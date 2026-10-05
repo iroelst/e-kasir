@@ -1329,7 +1329,7 @@
                     <div class="section-title">
                         <h2>Data</h2>
                     </div>
-                    <p style="color:var(--muted);font-size:13px">Data aplikasi dipisahkan berdasarkan akun Firebase. Data utama disimpan di Cloud Firestore dan akan disinkronkan sesuai role Admin/Kasir.</p><button class="btn" onclick="backup()">💾 Backup JSON</button> <label class="btn">📥 Restore JSON<input type="file" accept=".json" hidden onchange="restore(this.files[0])"></label>
+                    <p style="color:var(--muted);font-size:13px">Data aplikasi dipisahkan berdasarkan username pada perangkat. Login menggunakan akun cloud; sinkronisasi database cloud akan menjadi tahap berikutnya.</p><button class="btn" onclick="backup()">💾 Backup JSON</button> <label class="btn">📥 Restore JSON<input type="file" accept=".json" hidden onchange="restore(this.files[0])"></label>
                 </div>
             </section>
         </main>
@@ -1502,25 +1502,13 @@
                 else if (user.uid === 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2') currentRole = 'admin';
                 else currentRole = '';
             } catch (e) {
-                currentRole = user.uid === 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2' ? 'admin' : '';
+                currentRole = user.uid === 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2' ? 'admin' : ''
             }
-
-            // Akun Firebase tanpa role tidak boleh masuk ke aplikasi.
-            // Role kasir/admin diberikan melalui dokumen users/{uid} oleh Admin.
-            if (!isAdminClient() && !isKasirClient()) {
-                localStorage.removeItem(AUTH_KEY);
-                currentUser = null;
-                currentRole = '';
-                try { await fbAuth.signOut(); } catch (_) {}
-                showAuthMessage('Akun berhasil login, tetapi belum memiliki role. Hubungi Admin untuk mengaktifkan akun.', 'err');
-                return;
-            }
-
             document.getElementById('authScreen').style.display = 'none';
             renderUserChip();
             renderAll();
             await loadFirebaseData();
-            renderAll();
+            renderAll()
         }
 
         function isAdminClient() {
@@ -2026,6 +2014,24 @@
             ensurePeriod(rangeKey(r.from, r.to), r.from, r.to);
             save();
             renderAll()
+        }
+
+        function openModal(title, html) {
+            const modal = document.getElementById('modal');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalBody = document.getElementById('modalBody');
+            if (!modal || !modalTitle || !modalBody) return;
+            modalTitle.textContent = title || '';
+            modalBody.innerHTML = html || '';
+            modal.classList.add('show');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('modal');
+            if (!modal) return;
+            modal.classList.remove('show');
+            document.body.style.overflow = '';
         }
 
         function openOpeningModal() {
