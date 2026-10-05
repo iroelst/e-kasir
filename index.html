@@ -190,6 +190,9 @@ repairTransactionSnapshots();
 
 let cart=[], pay='Tunai', activeCat='Semua';
 const rupiah=n=>new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n||0);
+const formatQty=n=>{const v=Math.round((+n||0)*100)/100;return new Intl.NumberFormat('id-ID',{maximumFractionDigits:2}).format(v)};
+const roundQty=n=>Math.round((+n||0)*1000000)/1000000;
+const stockBaseQty=b=>roundQty((+(b?.stock)||0)*(+(b?.content||1)));
 const save=()=>localStorage.setItem(KEY,JSON.stringify(db));
 const today=()=>new Date().toISOString().slice(0,10);
 function openModal(title,body){document.getElementById('modalTitle').textContent=title;document.getElementById('modalBody').innerHTML=body;document.getElementById('modal').classList.add('show')}
@@ -213,7 +216,7 @@ function metrics(){
  rLaba.textContent=rupiah(totalO-totalH);rNet.textContent=rupiah(totalO-totalH-totalE);
 }
 function renderRecent(){let x=todayTx().slice(-6).reverse();recent.innerHTML=x.length?x.map(t=>`<div class="cart-item"><div><b>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</b><small style="display:block;color:var(--muted)">${t.time} · ${t.pay}</small></div><b>${rupiah(t.total)}</b></div>`).join(''):'<div class="empty">Belum ada transaksi hari ini.</div>'}
-function renderLow(){let x=db.bahan.filter(b=>b.stock<=b.min);lowStock.innerHTML=x.length?x.map(b=>`<div class="cart-item"><div><b>${b.name}</b><small style="display:block;color:var(--muted)">${b.stock} ${b.unit} tersisa</small></div><span class="badge warn">Menipis</span></div>`).join(''):'<div class="empty">Semua stok aman ✓</div>'}
+function renderLow(){let x=db.bahan.filter(b=>b.stock<=b.min);lowStock.innerHTML=x.length?x.map(b=>`<div class="cart-item"><div><b>${b.name}</b><small style="display:block;color:var(--muted)">${formatQty(stockBaseQty(b))} ${b.unit} tersisa</small></div><span class="badge warn">Menipis</span></div>`).join(''):'<div class="empty">Semua stok aman ✓</div>'}
 
 function renderCats(){let cats=['Semua',...new Set(db.menus.map(m=>m.cat))];catsEl= document.getElementById('cats');catsEl.innerHTML=cats.map(c=>`<button class="cat ${c===activeCat?'active':''}" onclick="activeCat='${c}';renderProducts();renderCats()">${c}</button>`).join('')}
 function renderProducts(){let q=(document.getElementById('posSearch')?.value||'').toLowerCase();let a=db.menus.filter(m=>m.active&&(activeCat==='Semua'||m.cat===activeCat)&&m.name.toLowerCase().includes(q));products.innerHTML=a.map(m=>`<div class="product" role="button" tabindex="0" onclick="addCart(${m.id})" onkeydown="if(event.key==='Enter'||event.key===' ')addCart(${m.id})"><div class="emoji">${m.emoji||'☕'}</div><h3>${m.name}</h3><p>${m.cat}</p><div class="row"><span class="price">${rupiah(m.price)}</span><button class="mini" type="button" onclick="event.stopPropagation();addCart(${m.id})">Tambah</button></div></div>`).join('')||'<div class="empty" style="grid-column:1/-1">Menu tidak ditemukan.</div>'}
@@ -294,7 +297,7 @@ function checkout(){
     const b=db.bahan.find(x=>x.name===name);
     const content=+(b.content||1);
     const consumedPackages=stockNeed[name]/content;
-    b.stock=Math.max(0,(+b.stock||0)-consumedPackages);
+    b.stock=roundQty(Math.max(0,(+b.stock||0)-consumedPackages));
   }
 
   save();
@@ -325,9 +328,9 @@ function renderBahan(){
     const low=(+b.stock||0)<=(+b.min||0);
     return `<tr>
       <td><b>${b.name}</b></td>
-      <td>${b.content}</td>
+      <td>${formatQty(b.content)}</td>
       <td>${b.unit}</td>
-      <td><b>${b.stock}</b></td>
+      <td><b>${formatQty(b.stock)}</b></td>
       <td>${rupiah(b.cost)}</td>
       <td>${rupiah(total)}</td>
       <td><span class="badge ${low?'warn':'ok'}">${low?'Menipis':'Aman'}</span></td>
