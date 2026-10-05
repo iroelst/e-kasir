@@ -38,8 +38,8 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
   <nav class="nav">
     <button class="active" data-page="dashboard"><span>▦</span><span>Dashboard</span></button>
     <button data-page="kasir"><span>🧾</span><span>Kasir</span></button>
-    <button data-page="menu"><span>☕</span><span>Menu</span></button>
-    <button data-page="bahan"><span>📦</span><span>Bahan & HPP</span></button>
+    <button data-page="menu"><span>☕</span><span>Menu & HPP</span></button>
+    <button data-page="bahan"><span>📦</span><span>Pembelian & Stok</span></button>
     <button data-page="pengeluaran"><span>💸</span><span>Pengeluaran</span></button>
     <button data-page="laporan"><span>📊</span><span>Laporan</span></button>
     <button data-page="pengaturan"><span>⚙️</span><span>Pengaturan</span></button>
@@ -185,7 +185,7 @@ function toast(s){let e=document.getElementById('toast');e.textContent=s;e.class
 function go(page){
  document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));document.getElementById(page).classList.add('active');
  document.querySelectorAll('.nav button').forEach(x=>x.classList.toggle('active',x.dataset.page===page));
- const titles={dashboard:'Dashboard',kasir:'Kasir',menu:'Menu',bahan:'Bahan & HPP',pengeluaran:'Pengeluaran',laporan:'Laporan',pengaturan:'Pengaturan'};
+ const titles={dashboard:'Dashboard',kasir:'Kasir',menu:'Menu & HPP',bahan:'Pembelian & Stok',pengeluaran:'Pengeluaran',laporan:'Laporan',pengaturan:'Pengaturan'};
  document.getElementById('pageTitle').textContent=titles[page]; renderAll();
 }
 document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>go(b.dataset.page));
