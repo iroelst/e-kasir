@@ -87,8 +87,9 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
  <div class="card">
   <div class="section-title"><h2>Stok Bulanan</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="openOpeningModal()">✏️ Atur Stok Awal</button><button class="btn primary" onclick="openPurchaseModal()">🛒 Pembelian Bahan</button></div></div>
   <div class="form-grid" style="margin-bottom:15px">
-   <div class="field"><label>PERIODE BULAN</label><input id="stockMonth" type="month" onchange="changeStockMonth(this.value)"></div>
-   <div class="field"><label>STATUS PERIODE</label><div style="display:flex;gap:8px"><div id="stockPeriodStatus" style="padding:11px 12px;background:#f8fafc;border-radius:10px;font-weight:700;flex:1">Belum dibuka</div><button class="btn" onclick="closeStockPeriod()">Tutup Bulan</button></div></div>
+   <div class="field"><label>DARI TANGGAL</label><input id="stockFrom" type="date" onchange="changeStockRange()"></div>
+   <div class="field"><label>SAMPAI TANGGAL</label><input id="stockTo" type="date" onchange="changeStockRange()"></div>
+   <div class="field full"><div id="stockPeriodStatus" style="padding:11px 12px;background:#f8fafc;border-radius:10px;font-weight:700">Periode aktif</div></div>
   </div>
   <div class="cards" style="margin-bottom:15px">
    <div class="card metric"><div><small>Total Stok Awal</small><strong id="stockOpeningTotal">Rp0</strong></div><div class="icon">📦</div></div>
@@ -148,33 +149,23 @@ db.expenses = Array.isArray(db.expenses) ? db.expenses : [];
 db.stockMoves = Array.isArray(db.stockMoves) ? db.stockMoves : [];
 db.stockPeriods = db.stockPeriods && typeof db.stockPeriods==='object' ? db.stockPeriods : {};
 db.nextId = Number.isFinite(+db.nextId) ? +db.nextId : 1;
-function periodKey(v){return v || new Date().toISOString().slice(0,7)}
-function ensurePeriod(key){
+function defaultRange(){const d=new Date(); const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'); const last=new Date(y,d.getMonth()+1,0).getDate(); return {from:`${y}-${m}-01`,to:`${y}-${m}-${String(last).padStart(2,'0')}`};}
+function rangeKey(from,to){return (from||'')+'__'+(to||'')}
+function getRange(){const a=document.getElementById('stockFrom')?.value,b=document.getElementById('stockTo')?.value; if(a&&b&&a<=b)return {from:a,to:b}; const d=defaultRange(); return d;}
+function ensurePeriod(key,from,to){
  if(db.stockPeriods[key]) return db.stockPeriods[key];
- const prev=new Date(key+'-01T00:00:00'); prev.setMonth(prev.getMonth()-1);
- const prevKey=prev.toISOString().slice(0,7);
  let opening={};
- // Bulan berikutnya otomatis mengambil Stok Akhir bulan sebelumnya.
- // Untuk periode pertama, Stok Awal HARUS diisi manual; tidak dianggap sebagai pembelian.
- if(db.stockPeriods[prevKey]) opening=JSON.parse(JSON.stringify(db.stockPeriods[prevKey].ending||{}));
- db.stockPeriods[key]={opening,ending:{},closed:false};
+ const candidates=Object.values(db.stockPeriods).filter(x=>x&&x.to&&x.to<from).sort((a,b)=>String(b.to).localeCompare(String(a.to)));
+ if(candidates.length) opening=JSON.parse(JSON.stringify(candidates[0].ending||{}));
+ db.stockPeriods[key]={from,to,opening,openingDate:null,ending:{}};
  return db.stockPeriods[key];
 }
-function monthTransactions(key){return db.transactions.filter(t=>String(t.date||'').slice(0,7)===key)}
-function monthPurchases(key){return db.stockMoves.filter(m=>m.type==='purchase' && m.date.slice(0,7)===key)}
-function recipeItemParts(item){
- if(Array.isArray(item)) return {name:item[0],qty:+item[1]||0};
- const b=db.bahan.find(x=>x.id===item?.bahanId);
- return {name:b?.name||item?.name||'',qty:+item?.qty||0};
-}
-function usageForMonth(b,key){
- let used=0; monthTransactions(key).forEach(t=>{(t.items||[]).forEach(it=>{let r=db.recipes.find(x=>x.menuId===it.id);if(r) r.items.forEach(item=>{const z=recipeItemParts(item);if(z.name===b.name) used+=z.qty*(+it.qty||0)})})});
- return used;
-}
-function stockSummary(b,key){
- const p=ensurePeriod(key), opening=+(p.opening[b.id]??0), purchases=monthPurchases(key).filter(x=>x.bahanId===b.id).reduce((a,x)=>a+(+x.qty||0),0), used=usageForMonth(b,key), ending=opening+purchases-used;
- return {opening,purchases,used,ending};
-}
+function inRange(date,from,to){return String(date||'')>=from&&String(date||'')<=to}
+function rangeTransactions(from,to){return db.transactions.filter(t=>inRange(t.date,from,to))}
+function rangePurchases(from,to){return db.stockMoves.filter(m=>m.type==='purchase'&&inRange(m.date,from,to))}
+function recipeItemParts(item){if(Array.isArray(item))return {name:item[0],qty:+item[1]||0};const b=db.bahan.find(x=>x.id===item?.bahanId);return {name:b?.name||item?.name||'',qty:+item?.qty||0}}
+function usageForRange(b,from,to){let used=0;rangeTransactions(from,to).forEach(t=>(t.items||[]).forEach(it=>{let r=db.recipes.find(x=>x.menuId===it.id);if(r)r.items.forEach(item=>{const z=recipeItemParts(item);if(z.name===b.name)used+=z.qty*(+it.qty||0)})}));return used}
+function stockSummary(b,from,to){const key=rangeKey(from,to),p=ensurePeriod(key,from,to),opening=+(p.opening[b.id]??0),purchases=rangePurchases(from,to).filter(x=>x.bahanId===b.id).reduce((a,x)=>a+(+x.qty||0),0),used=usageForRange(b,from,to),ending=opening+purchases-used;return {opening,purchases,used,ending}}
 let cart=[], pay='Tunai', activeCat='Semua';
 const rupiah=n=>new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n||0);
 const formatQty=n=>Number.isInteger(+n)?String(+n):String(Number(+n).toFixed(2)).replace(/\.?0+$/,'');
@@ -221,49 +212,24 @@ function checkout(){
 }
 function renderMenuTable(){let q=(menuSearch.value||'').toLowerCase();let a=db.menus.filter(m=>m.name.toLowerCase().includes(q));menuTable.innerHTML=a.map(m=>`<tr><td><b>${m.emoji||'☕'} ${m.name}</b></td><td>${m.cat}</td><td>${rupiah(m.price)}</td><td>${rupiah(m.hpp)}</td><td><b>${rupiah(m.price-m.hpp)}</b></td><td><span class="badge ${m.active?'ok':''}">${m.active?'Aktif':'Nonaktif'}</span></td><td><button class="btn" onclick="editMenu(${m.id})">Edit</button></td></tr>`).join('')}
 function renderBahan(){
- const key=document.getElementById('stockMonth')?.value||periodKey(); ensurePeriod(key);
- const p=db.stockPeriods[key];
+ const r=getRange(),key=rangeKey(r.from,r.to),p=ensurePeriod(key,r.from,r.to);
  let openingTotal=0,purchaseTotal=0,usageTotal=0,endingTotal=0;
- bahanTable.innerHTML=db.bahan.map(b=>{
-   const x=stockSummary(b,key);
-   const purchaseValue=monthPurchases(key).filter(m=>m.bahanId===b.id).reduce((a,m)=>a+(+m.total||0),0);
-   openingTotal+=x.opening*(+b.cost||0); purchaseTotal+=purchaseValue; usageTotal+=x.used*(+b.cost||0); endingTotal+=Math.max(0,x.ending)*(+b.cost||0);
-   const safe=x.ending>(+b.min||0);
-   return `<tr><td><b>${b.name}</b></td><td>${b.unit}</td><td>${rupiah(b.cost)}</td><td>${formatQty(x.opening)}</td><td>${formatQty(x.purchases)}</td><td>${formatQty(x.used)}</td><td><b>${formatQty(Math.max(0,x.ending))}</b></td><td><span class=\"badge ${safe?'ok':'warn'}\">${safe?'Aman':'Menipis'}</span></td><td><button class=\"btn\" onclick=\"editBahan(${b.id})\">Edit</button></td></tr>`;
- }).join('')||'<tr><td colspan=\"9\"><div class=\"empty\">Belum ada bahan. Tambahkan bahan terlebih dahulu.</div></td></tr>';
- stockOpeningTotal.textContent=rupiah(openingTotal); stockPurchaseTotal.textContent=rupiah(purchaseTotal); stockUsageTotal.textContent=rupiah(usageTotal); stockEndingTotal.textContent=rupiah(endingTotal);
- stockPeriodStatus.textContent=p.closed?'Periode ditutup':'Periode aktif';
- purchaseTable.innerHTML=monthPurchases(key).slice().reverse().map(m=>`<tr><td>${m.date}</td><td><b>${m.bahanName}</b></td><td>${formatQty(m.qty)} ${m.unit}</td><td>${rupiah(m.cost)}</td><td>${rupiah(m.total)}</td><td>${m.note||'-'}</td></tr>`).join('')||'<tr><td colspan=\"6\"><div class=\"empty\">Belum ada pembelian bulan ini.</div></td></tr>';
- recipeInfo.innerHTML=db.recipes.length?db.recipes.map(r=>{let m=db.menus.find(x=>x.id===r.menuId);let cost=r.items.reduce((ss,item)=>{const z=recipeItemParts(item);return ss+(db.bahan.find(b=>b.name===z.name)?.cost||0)*z.qty},0);return `<div class=\"cart-item\"><div><b>${m?.name||'Menu'}</b><small style=\"display:block;color:var(--muted)\">${r.items.map(item=>{const z=recipeItemParts(item);return z.name+' '+formatQty(z.qty)}).join(' · ')}</small></div><b>${rupiah(cost)}</b></div>`}).join(''):'<div class=\"empty\">Belum ada resep. Buat menu dan susun resepnya untuk menghitung HPP otomatis.</div>';
+ bahanTable.innerHTML=db.bahan.map(b=>{const x=stockSummary(b,r.from,r.to);const pv=rangePurchases(r.from,r.to).filter(m=>m.bahanId===b.id).reduce((a,m)=>a+(+m.total||0),0);openingTotal+=x.opening*(+b.cost||0);purchaseTotal+=pv;usageTotal+=x.used*(+b.cost||0);endingTotal+=Math.max(0,x.ending)*(+b.cost||0);const safe=x.ending>(+b.min||0);return `<tr><td><b>${b.name}</b></td><td>${b.unit}</td><td>${rupiah(b.cost)}</td><td>${formatQty(x.opening)}</td><td>${formatQty(x.purchases)}</td><td>${formatQty(x.used)}</td><td><b>${formatQty(Math.max(0,x.ending))}</b></td><td><span class="badge ${safe?'ok':'warn'}">${safe?'Aman':'Menipis'}</span></td><td><button class="btn" onclick="editBahan(${b.id})">Edit</button></td></tr>`}).join('')||'<tr><td colspan="9"><div class="empty">Belum ada bahan. Tambahkan bahan terlebih dahulu.</div></td></tr>';
+ stockOpeningTotal.textContent=rupiah(openingTotal);stockPurchaseTotal.textContent=rupiah(purchaseTotal);stockUsageTotal.textContent=rupiah(usageTotal);stockEndingTotal.textContent=rupiah(endingTotal);
+ stockPeriodStatus.textContent=`Periode ${r.from.split('-').reverse().join('/')} – ${r.to.split('-').reverse().join('/')} · Stok akhir dihitung otomatis`;
+ purchaseTable.innerHTML=rangePurchases(r.from,r.to).slice().reverse().map(m=>`<tr><td>${m.date}</td><td><b>${m.bahanName}</b></td><td>${formatQty(m.qty)} ${m.unit}</td><td>${rupiah(m.cost)}</td><td>${rupiah(m.total)}</td><td>${m.note||'-'}</td></tr>`).join('')||'<tr><td colspan="6"><div class="empty">Belum ada pembelian pada periode ini.</div></td></tr>';
+ recipeInfo.innerHTML=db.recipes.length?db.recipes.map(r=>{let m=db.menus.find(x=>x.id===r.menuId);let cost=r.items.reduce((ss,item)=>{const z=recipeItemParts(item);return ss+(db.bahan.find(b=>b.name===z.name)?.cost||0)*z.qty},0);return `<div class="cart-item"><div><b>${m?.name||'Menu'}</b><small style="display:block;color:var(--muted)">${r.items.map(item=>{const z=recipeItemParts(item);return z.name+' '+formatQty(z.qty)}).join(' · ')}</small></div><b>${rupiah(cost)}</b></div>`}).join(''):'<div class="empty">Belum ada resep. Buat menu dan susun resepnya untuk menghitung HPP otomatis.</div>';
+ document.getElementById('stockFrom').value=r.from;document.getElementById('stockTo').value=r.to;
 }
-function changeStockMonth(v){if(!v)return;ensurePeriod(v);save();renderBahan()}
+function changeStockRange(){const r=getRange();if(r.from>r.to)return toast('Tanggal awal tidak boleh melewati tanggal akhir');ensurePeriod(rangeKey(r.from,r.to),r.from,r.to);save();renderAll()}
 function openOpeningModal(){
- const key=document.getElementById('stockMonth')?.value||periodKey(); const p=ensurePeriod(key);
- if(monthPurchases(key).length||monthTransactions(key).length)return toast('Stok awal tidak dapat diubah setelah ada aktivitas bulan ini');
- const prev=new Date(key+'-01T00:00:00'); prev.setMonth(prev.getMonth()-1); const prevKey=prev.toISOString().slice(0,7);
- if(db.stockPeriods[prevKey]) return toast('Stok awal bulan ini otomatis mengikuti Stok Akhir '+prevKey);
+ const r=getRange(),key=rangeKey(r.from,r.to),p=ensurePeriod(key,r.from,r.to);
+ const prior=Object.values(db.stockPeriods).filter(x=>x&&x.to&&x.to<r.from).sort((a,b)=>String(b.to).localeCompare(String(a.to)))[0];
+ if(prior&&prior.ending&&Object.keys(prior.ending).length)return toast('Stok awal periode ini otomatis mengikuti stok akhir periode sebelumnya');
  const fields=db.bahan.map(b=>{const v=p.opening[b.id]??0;return `<div class="field"><label>${b.name} (${b.unit})</label><input id="open_${b.id}" type="number" step="0.01" min="0" value="${v}"></div>`}).join('');
- openModal('Atur Stok Awal '+key,`<p style="margin-top:0;color:var(--muted);font-size:13px">Isi berdasarkan stok fisik yang tersedia saat mulai menggunakan aplikasi. Ini <b>bukan pembelian</b>.</p><div class="form-grid">${fields||'<div class="empty">Belum ada bahan.</div>'}</div><button class="btn primary" style="margin-top:15px" onclick="saveOpening('${key}')">Simpan Stok Awal</button>`);
+ openModal('Stok Awal',`<p style="margin-top:0;color:var(--muted);font-size:13px">Masukkan stok fisik yang sudah tersedia saat mulai menggunakan aplikasi. Stok ini <b>bukan pembelian</b>.</p><div class="field"><label>TANGGAL STOK AWAL</label><input id="openingDate" type="date" value="${p.openingDate||r.from}" min="${r.from}" max="${r.to}"></div><div class="form-grid" style="margin-top:10px">${fields||'<div class="empty">Belum ada bahan.</div>'}</div><button class="btn primary" style="margin-top:15px" onclick="saveOpening()">Simpan Stok Awal</button>`);
 }
-function saveOpening(key){
- const prev=new Date(key+'-01T00:00:00'); prev.setMonth(prev.getMonth()-1); const prevKey=prev.toISOString().slice(0,7);
- if(db.stockPeriods[prevKey])return toast('Stok awal sudah otomatis dari bulan sebelumnya');
- const p=ensurePeriod(key);db.bahan.forEach(b=>{const e=document.getElementById('open_'+b.id);if(e)p.opening[b.id]=+e.value||0;});save();closeModal();renderAll();toast('Stok awal tersimpan')
-}
-function openPurchaseModal(){
- const opts=db.bahan.map(b=>`<option value="${b.id}">${b.name} (${b.unit})</option>`).join('');
- openModal('Pembelian Bahan',`<div class="form-grid"><div class="field full"><label>BAHAN</label><select id="pBahan" style="width:100%;padding:11px;border:1px solid #e5e7eb;border-radius:10px"><option value="">Pilih bahan...</option>${opts}<option value="__new">＋ Tambah Bahan Baru</option></select></div><div id="newBahanFields" class="form-grid full" style="display:none"><div class="field"><label>NAMA BAHAN BARU</label><input id="pNewName"></div><div class="field"><label>SATUAN</label><select id="pNewUnit"><option>gram</option><option>ml</option><option>pcs</option></select></div><div class="field"><label>MINIMUM STOK</label><input id="pNewMin" type="number" value="0"></div></div><div class="field"><label>JUMLAH BELI</label><input id="pQty" type="number" step="0.01" min="0"></div><div class="field"><label>HARGA / SATUAN</label><input id="pCost" type="number" min="0"></div><div class="field full"><label>KETERANGAN</label><input id="pNote" placeholder="Contoh: pembelian stok mingguan"></div></div><button class="btn primary" style="margin-top:15px" onclick="savePurchase()">Simpan Pembelian</button>`);
- pBahan.onchange=()=>{newBahanFields.style.display=pBahan.value==='__new'?'grid':'none';if(pBahan.value&&pBahan.value!=='__new'){let b=db.bahan.find(x=>x.id==pBahan.value);pCost.value=b?.cost||''}};
-}
-function savePurchase(){
- let id=pBahan.value;
- if(id==='__new'){const name=pNewName.value.trim();if(!name)return toast('Nama bahan baru wajib diisi');let b={id:db.nextId++,name,unit:pNewUnit.value,cost:+pCost.value||0,stock:0,min:+pNewMin.value||0};db.bahan.push(b);id=b.id}
- const b=db.bahan.find(x=>x.id==id);const qty=+pQty.value||0,cost=+pCost.value||0;if(!b||qty<=0)return toast('Lengkapi bahan dan jumlah pembelian');
- b.cost=cost||b.cost; const key=(document.getElementById('stockMonth')?.value||periodKey()); ensurePeriod(key);
- db.stockMoves.push({id:db.nextId++,type:'purchase',date:today(),bahanId:b.id,bahanName:b.name,qty,cost:b.cost,total:qty*b.cost,unit:b.unit,note:pNote.value||''});
- save();closeModal();renderAll();toast('Pembelian bahan tersimpan');
-}
-function closeStockPeriod(){const key=document.getElementById('stockMonth')?.value||periodKey();const p=ensurePeriod(key);p.ending={};db.bahan.forEach(b=>p.ending[b.id]=stockSummary(b,key).ending);p.closed=true;save();renderBahan();toast('Periode stok ditutup')}
+function saveOpening(){const r=getRange(),key=rangeKey(r.from,r.to),p=ensurePeriod(key,r.from,r.to),d=document.getElementById('openingDate').value;if(!d||d>r.to)return toast('Tanggal stok awal tidak valid');p.openingDate=d;db.bahan.forEach(b=>{const e=document.getElementById('open_'+b.id);if(e)p.opening[b.id]=+e.value||0});save();closeModal();renderAll();toast('Stok awal tersimpan')}
 function renderExpenses(){expenseTable.innerHTML=db.expenses.slice().reverse().map((e,i)=>`<tr><td>${e.date}</td><td>${e.cat}</td><td>${e.note}</td><td><b>${rupiah(e.amount)}</b></td><td><button class="btn" onclick="deleteExpense(${db.expenses.length-1-i})">Hapus</button></td></tr>`).join('')||'<tr><td colspan="5"><div class="empty">Belum ada pengeluaran.</div></td></tr>'}
 function renderReport(){reportTable.innerHTML=db.transactions.slice().reverse().map(t=>`<tr><td>${t.date} ${t.time}</td><td>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</td><td>${t.pay}</td><td>${rupiah(t.total)}</td><td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td></tr>`).join('')||'<tr><td colspan="6"><div class="empty">Belum ada transaksi.</div></td></tr>'}
 function openModal(title,body){modalTitle.textContent=title;modalBody.innerHTML=body;modal.classList.add('show')}function closeModal(){modal.classList.remove('show')}
@@ -299,7 +265,7 @@ function saveSettings(){db.settings={name:shopName.value,phone:shopPhone.value,a
 function backup(){let blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='backup-kopikasir-'+today()+'.json';a.click();URL.revokeObjectURL(a.href);toast('Backup dibuat')}
 function restore(file){if(!file)return;let r=new FileReader();r.onload=()=>{try{let x=JSON.parse(r.result);if(!x.menus||!x.transactions)throw 0;db=x;save();renderAll();toast('Data berhasil dipulihkan')}catch(e){toast('File backup tidak valid')}};r.readAsText(file)}
 function exportCSV(){let rows=[['Tanggal','Waktu','Item','Pembayaran','Omzet','HPP','Laba'],...db.transactions.map(t=>[t.date,t.time,t.items.map(i=>i.name+' x'+i.qty).join(' | '),t.pay,t.total,t.hpp,t.total-t.hpp])];let csv=rows.map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(',')).join('\n');let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='laporan-kopikasir.csv';a.click()}
-function renderAll(){metrics();renderRecent();renderLow();renderCats();renderProducts();renderCart();renderMenuTable();if(document.getElementById("stockMonth")&&!document.getElementById("stockMonth").value)document.getElementById("stockMonth").value=periodKey();renderBahan();renderExpenses();renderReport();shopName.value=db.settings.name;shopPhone.value=db.settings.phone;shopAddress.value=db.settings.address}
+function renderAll(){metrics();renderRecent();renderLow();renderCats();renderProducts();renderCart();renderMenuTable();renderBahan();renderExpenses();renderReport();shopName.value=db.settings.name;shopPhone.value=db.settings.phone;shopAddress.value=db.settings.address}
 renderAll();
 </script>
 </body>
