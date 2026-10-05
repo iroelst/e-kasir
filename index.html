@@ -298,6 +298,9 @@ function checkout(){
   renderCart();
   renderAll();
 }
+function recipeForMenu(menuId){
+  return db.recipes.find(r=>r.menuId===menuId)||{menuId,items:[]};
+}
 function baseCostOf(b){
   if(!b)return 0;
   const content=+(b.content||1);
