@@ -1778,6 +1778,87 @@
                 ending
             }
         }
+        // ===== MODAL + RESEP HELPERS =====
+        let menuRecipeDraft = [];
+
+        function openModal(title, html) {
+            const modal = document.getElementById('modal');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalBody = document.getElementById('modalBody');
+            if (!modal || !modalTitle || !modalBody) return;
+            modalTitle.textContent = title || '';
+            modalBody.innerHTML = html || '';
+            modal.classList.add('show');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('modal');
+            if (!modal) return;
+            modal.classList.remove('show');
+            document.body.style.overflow = '';
+        }
+
+        function recipeCost(items) {
+            return (items || []).reduce((sum, item) => {
+                const bahan = db.bahan.find(b => b.id === +item.bahanId);
+                if (!bahan) return sum;
+                return sum + unitCost(bahan) * (+item.qty || 0);
+            }, 0);
+        }
+
+        function renderRecipeRows() {
+            const box = document.getElementById('recipeRows');
+            if (!box) return;
+            if (!db.bahan.length) {
+                box.innerHTML = '<div class=\"empty\">Belum ada bahan. Tambahkan bahan terlebih dahulu melalui menu Pembelian & Stok.</div>';
+                const hppEl = document.getElementById('fHpp');
+                const fcEl = document.getElementById('foodCostPreview');
+                if (hppEl) hppEl.value = '0';
+                if (fcEl) fcEl.value = '-';
+                return;
+            }
+
+            if (!Array.isArray(menuRecipeDraft)) menuRecipeDraft = [];
+            const options = db.bahan.map(b =>
+                `<option value=\"${b.id}\">${b.name} — ${formatQty(b.content)} ${b.unit} · ${rupiah(unitCost(b))}/${b.unit}</option>`
+            ).join('');
+
+            box.innerHTML = menuRecipeDraft.length ? menuRecipeDraft.map((row, i) => {
+                const qty = +row.qty || 0;
+                const bahan = db.bahan.find(b => b.id === +row.bahanId);
+                const subtotal = bahan ? unitCost(bahan) * qty : 0;
+                return `<div class=\"form-grid\" style=\"margin-bottom:10px;align-items:end\">
+                    <div class=\"field\">
+                        <label>BAHAN ${i + 1}</label>
+                        <select id=\"riB_${i}\" onchange=\"updateRecipeDraft(${i})\">
+                            <option value=\"0\">Pilih bahan</option>${options}
+                        </select>
+                    </div>
+                    <div class=\"field\">
+                        <label>PEMAKAIAN (${bahan?.unit || 'satuan'})</label>
+                        <div style=\"display:flex;gap:8px\">
+                            <input id=\"riQ_${i}\" type=\"number\" min=\"0\" step=\"${bahan?.unit === 'pcs' ? '1' : '0.01'}\" value=\"${qty}\" oninput=\"updateRecipeDraft(${i})\">
+                            <button type=\"button\" class=\"btn\" onclick=\"removeRecipeRow(${i})\">Hapus</button>
+                        </div>
+                        <small style=\"color:var(--muted)\">${bahan ? rupiah(subtotal) : 'Pilih bahan'}</small>
+                    </div>
+                </div>`;
+            }).join('') : '<div class=\"empty\">Belum ada bahan dalam resep. Klik “+ Tambah Bahan”.</div>';
+
+            menuRecipeDraft.forEach((row, i) => {
+                const select = document.getElementById('riB_' + i);
+                if (select) select.value = String(row.bahanId || 0);
+            });
+
+            const hpp = recipeCost(menuRecipeDraft);
+            const price = +(document.getElementById('fPrice')?.value || 0);
+            const hppEl = document.getElementById('fHpp');
+            const fcEl = document.getElementById('foodCostPreview');
+            if (hppEl) hppEl.value = Math.round(hpp);
+            if (fcEl) fcEl.value = price > 0 ? ((hpp / price) * 100).toFixed(1) + '%' : '-';
+        }
+
         let cart = [],
             pay = 'Tunai',
             activeCat = 'Semua';
@@ -2014,24 +2095,6 @@
             ensurePeriod(rangeKey(r.from, r.to), r.from, r.to);
             save();
             renderAll()
-        }
-
-        function openModal(title, html) {
-            const modal = document.getElementById('modal');
-            const modalTitle = document.getElementById('modalTitle');
-            const modalBody = document.getElementById('modalBody');
-            if (!modal || !modalTitle || !modalBody) return;
-            modalTitle.textContent = title || '';
-            modalBody.innerHTML = html || '';
-            modal.classList.add('show');
-            document.body.style.overflow = 'hidden';
-        }
-
-        function closeModal() {
-            const modal = document.getElementById('modal');
-            if (!modal) return;
-            modal.classList.remove('show');
-            document.body.style.overflow = '';
         }
 
         function openOpeningModal() {
