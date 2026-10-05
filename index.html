@@ -85,7 +85,7 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
 
 <section id="bahan" class="page">
  <div class="card">
-  <div class="section-title"><h2>Stok Bulanan</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="openOpeningModal()">✏️ Atur Stok Awal</button><button class="btn primary" onclick="openPurchaseModal()">🛒 Pembelian Bahan</button></div></div>
+  <div class="section-title"><div><h2>Stok & Pembelian Bahan</h2><small style="color:var(--muted)">Stok awal diisi saat mulai. Pembelian menambah stok otomatis dan masuk ke riwayat.</small></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="openOpeningModal()">📦 Stok Awal</button><button class="btn primary" onclick="openPurchaseModal()">🛒 Pembelian Bahan</button></div></div>
   <div class="form-grid" style="margin-bottom:15px">
    <div class="field"><label>DARI TANGGAL</label><input id="stockFrom" type="date" onchange="changeStockRange()"></div>
    <div class="field"><label>SAMPAI TANGGAL</label><input id="stockTo" type="date" onchange="changeStockRange()"></div>
@@ -97,10 +97,10 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
    <div class="card metric"><div><small>Pemakaian Produksi</small><strong id="stockUsageTotal">Rp0</strong></div><div class="icon">☕</div></div>
    <div class="card metric"><div><small>Total Stok Akhir</small><strong id="stockEndingTotal">Rp0</strong></div><div class="icon">📊</div></div>
   </div>
-  <div class="section-title"><h3 style="margin:0">Daftar Stok</h3><button class="btn" onclick="openBahanModal()">+ Tambah Bahan</button></div>
+  <div class="section-title"><div><h3 style="margin:0">Tampil Stok</h3><small style="color:var(--muted)">Stok akhir = stok awal + pembelian − pemakaian produksi.</small></div><button class="btn" onclick="openBahanModal()">+ Tambah Bahan</button></div>
   <div style="overflow:auto"><table class="table"><thead><tr><th>Bahan</th><th>Isi Kemasan</th><th>Harga Kemasan</th><th>Stok Awal</th><th>Pembelian</th><th>Terpakai</th><th>Stok Akhir</th><th>Nilai Stok Akhir</th><th>Status</th><th></th></tr></thead><tbody id="bahanTable"></tbody></table></div>
  </div>
- <div class="card" style="margin-top:18px"><div class="section-title"><h2>Riwayat Pembelian</h2></div><div style="overflow:auto"><table class="table"><thead><tr><th>Tanggal</th><th>Bahan</th><th>Jumlah Kemasan</th><th>Isi Masuk</th><th>Harga Kemasan</th><th>Total</th><th>Keterangan</th></tr></thead><tbody id="purchaseTable"></tbody></table></div></div>
+ <div class="card" style="margin-top:18px"><div class="section-title"><div><h2>Riwayat Pembelian</h2><small style="color:var(--muted)">Pembelian yang disimpan dari form Pembelian Bahan tampil di sini.</small></div></div><div style="overflow:auto"><table class="table"><thead><tr><th>Tanggal</th><th>Bahan</th><th>Jumlah Kemasan</th><th>Isi Masuk</th><th>Harga Kemasan</th><th>Total</th><th>Keterangan</th></tr></thead><tbody id="purchaseTable"></tbody></table></div></div>
  <div class="card" style="margin-top:18px"><div class="section-title"><h2>Contoh Resep & HPP</h2><small style="color:var(--muted)">HPP dihitung dari bahan yang dipakai</small></div><div id="recipeInfo"></div></div>
 </section>
 
@@ -128,8 +128,7 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
 <div class="toast" id="toast"></div>
 
 <script>
-// Versi penyimpanan baru agar data localStorage versi lama tidak ikut terbaca.
-const KEY='kopikasir_v2';
+const KEY='kopikasir_v3';
 let db=JSON.parse(localStorage.getItem(KEY)||'null')||{
   settings:{name:'KopiKasir Coffee',phone:'',address:''},
   menus:[],
@@ -247,7 +246,7 @@ function openOpeningModal(){
  const prior=Object.values(db.stockPeriods).filter(x=>x&&x.to&&x.to<r.from).sort((a,b)=>String(b.to).localeCompare(String(a.to)))[0];
  if(prior&&prior.ending&&Object.keys(prior.ending).length)return toast('Stok awal periode ini otomatis mengikuti stok akhir periode sebelumnya');
  const fields=db.bahan.map(b=>{const v=p.opening[b.id]??0;return `<div class="form-grid" style="margin-bottom:8px"><div class="field"><label>${b.name}</label><small style="color:var(--muted)">Isi kemasan ${formatQty(b.content)} ${b.unit} · ${rupiah(b.cost)}/kemasan</small></div><div class="field"><label>STOK AWAL (${b.unit})</label><input id="open_${b.id}" type="number" step="${b.unit==='pcs'?'1':'0.01'}" min="0" value="${v}" oninput="updateOpeningValue(${b.id})"><small id="openVal_${b.id}" style="color:var(--muted)">${rupiah(stockValue(b,v))}</small></div></div>`}).join('');
- openModal('Stok Awal',`<p style="margin-top:0;color:var(--muted);font-size:13px">Masukkan stok fisik yang sudah tersedia saat mulai menggunakan aplikasi. Stok ini <b>bukan pembelian</b>. Nilai stok dihitung otomatis dari harga kemasan.</p><div class="field"><label>TANGGAL STOK AWAL</label><input id="openingDate" type="date" value="${p.openingDate||r.from}" min="${r.from}" max="${r.to}"></div><div style="margin-top:12px">${fields||'<div class="empty">Belum ada bahan. <button class="btn" onclick="closeModal();openBahanModal()">＋ Tambah Bahan</button></div>'}</div><button class="btn primary" style="margin-top:15px" onclick="saveOpening()">Simpan Stok Awal</button>`);
+ openModal('Form Stok Awal',`<p style="margin-top:0;color:var(--muted);font-size:13px"><b>Stok Awal</b> adalah stok fisik yang sudah tersedia sebelum aplikasi digunakan. Stok ini <b>bukan pembelian</b>, tidak masuk Riwayat Pembelian, dan setelah disimpan langsung masuk ke Tampil Stok.</p><div class="field"><label>TANGGAL STOK AWAL</label><input id="openingDate" type="date" value="${p.openingDate||r.from}" min="${r.from}" max="${r.to}"></div><div style="margin-top:12px">${fields||'<div class="empty">Belum ada bahan. <button class="btn" onclick="closeModal();openBahanModal()">＋ Tambah Bahan</button></div>'}</div><button class="btn primary" style="margin-top:15px" onclick="saveOpening()">Simpan Stok Awal</button>`);
 }
 function updateOpeningValue(id){const b=db.bahan.find(x=>x.id===id),e=document.getElementById('open_'+id),v=document.getElementById('openVal_'+id);if(b&&e&&v)v.textContent=rupiah(stockValue(b,+e.value||0))}
 function saveOpening(){const r=getRange(),key=rangeKey(r.from,r.to),p=ensurePeriod(key,r.from,r.to),d=document.getElementById('openingDate').value;if(!d||d>r.to)return toast('Tanggal stok awal tidak valid');p.openingDate=d;db.bahan.forEach(b=>{const e=document.getElementById('open_'+b.id);if(e)p.opening[b.id]=+e.value||0});save();closeModal();renderAll();toast('Stok awal tersimpan')}
@@ -309,7 +308,7 @@ function openPurchaseModal(){
  const selectedId=pendingPurchaseBahanId;
  const opts=db.bahan.map(b=>`<option value="${b.id}" ${selectedId===b.id?'selected':''}>${b.name} — ${formatQty(b.content)} ${b.unit}/kemasan — ${rupiah(b.cost)}</option>`).join('');
  const defaultDate=(today()>=r.from&&today()<=r.to)?today():r.from;
- openModal('Pembelian Bahan',`<div class="form-grid"><div class="field full"><label>BAHAN</label><select id="pBahan" onchange="updatePurchasePreview()">${opts}</select><button type="button" class="btn" style="margin-top:8px" onclick="openBahanForPurchase()">＋ Tambah Bahan Baru</button></div><div class="field"><label>TANGGAL PEMBELIAN</label><input id="pDate" type="date" value="${defaultDate}" min="${r.from}" max="${r.to}"></div><div class="field"><label>JUMLAH KEMASAN</label><input id="pPackages" type="number" step="1" min="1" value="1" oninput="updatePurchasePreview()"></div><div class="field"><label>HARGA / KEMASAN</label><input id="pCost" type="number" min="0" oninput="updatePurchasePreview()"></div><div class="field"><label>ISI MASUK</label><input id="pQty" readonly></div><div class="field full"><label>KETERANGAN</label><input id="pNote" placeholder="Contoh: pembelian stok"></div></div><div id="purchasePreview" style="margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:var(--muted)"></div><button class="btn primary" style="margin-top:15px" onclick="savePurchase()">Simpan Pembelian</button>`);
+ openModal('Form Pembelian Bahan',`<p style="margin-top:0;color:var(--muted);font-size:13px">Gunakan form ini setiap kali membeli bahan. Jumlah diisi dalam <b>kemasan</b>; sistem otomatis menghitung isi yang masuk, menambah Tampil Stok, dan mencatat Riwayat Pembelian.</p><div class="form-grid"><div class="field full"><label>BAHAN</label><select id="pBahan" onchange="updatePurchasePreview()">${opts}</select><button type="button" class="btn" style="margin-top:8px" onclick="openBahanForPurchase()">＋ Tambah Bahan Baru</button></div><div class="field"><label>TANGGAL PEMBELIAN</label><input id="pDate" type="date" value="${defaultDate}" min="${r.from}" max="${r.to}"></div><div class="field"><label>JUMLAH KEMASAN</label><input id="pPackages" type="number" step="1" min="1" value="1" oninput="updatePurchasePreview()"></div><div class="field"><label>HARGA / KEMASAN</label><input id="pCost" type="number" min="0" oninput="updatePurchasePreview()"></div><div class="field"><label>ISI MASUK</label><input id="pQty" readonly></div><div class="field full"><label>KETERANGAN</label><input id="pNote" placeholder="Contoh: pembelian stok"></div></div><div id="purchasePreview" style="margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:var(--muted)"></div><button class="btn primary" style="margin-top:15px" onclick="savePurchase()">Simpan Pembelian</button>`);
  const b=db.bahan.find(x=>x.id===selectedId)||db.bahan[0];
  if(pendingPurchaseBahanId!==null)pendingPurchaseBahanId=null;
  pCost.value=b.cost;
@@ -325,9 +324,8 @@ function savePurchase(){
  if(b.unit==='pcs'&&!Number.isInteger(n))return toast('Jumlah kemasan untuk bahan pcs harus bilangan bulat');
  if(price<0)return toast('Harga kemasan tidak valid');
  const qty=n*b.content;
- // Satu transaksi pembelian dicatat ke ledger pembelian dan stockMoves.
- // rangePurchases() membaca db.purchases, jadi db.purchases wajib diisi saat pembelian disimpan.
  const purchase={id:db.nextId++,type:'purchase',date,bahanId:b.id,bahanName:b.name,packages:n,qty,unit:b.unit,cost:price,total:n*price,note:pNote.value.trim()};
+ // Pembelian menjadi sumber stok masuk dan riwayat pembelian.
  db.purchases.push({...purchase});
  db.stockMoves.push({...purchase});
  // Pembelian adalah stok masuk. Tidak perlu dimasukkan lagi sebagai stok awal.
