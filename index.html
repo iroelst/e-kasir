@@ -189,6 +189,8 @@ let cart=[], pay='Tunai', activeCat='Semua';
 const rupiah=n=>new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n||0);
 const save=()=>localStorage.setItem(KEY,JSON.stringify(db));
 const today=()=>new Date().toISOString().slice(0,10);
+function openModal(title,body){document.getElementById('modalTitle').textContent=title;document.getElementById('modalBody').innerHTML=body;document.getElementById('modal').classList.add('show')}
+function closeModal(){document.getElementById('modal').classList.remove('show')}
 function toast(s){let e=document.getElementById('toast');e.textContent=s;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),1800)}
 function go(page){
  document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));document.getElementById(page).classList.add('active');
@@ -295,6 +297,96 @@ function checkout(){
   cart=[];
   renderCart();
   renderAll();
+}
+function baseCostOf(b){
+  if(!b)return 0;
+  const content=+(b.content||1);
+  return content>0?(+(b.cost||0)/content):0;
+}
+function calcRecipeCost(items=[]){
+  return items.reduce((sum,[name,qty])=>{
+    const b=db.bahan.find(x=>x.name===name);
+    return sum+baseCostOf(b)*(+qty||0);
+  },0);
+}
+function renderBahan(){
+  const el=document.getElementById('bahanTable');
+  if(!el)return;
+  el.innerHTML=db.bahan.map(b=>{
+    const total=(+b.stock||0)*(+b.cost||0);
+    const low=(+b.stock||0)<=(+b.min||0);
+    return `<tr>
+      <td><b>${b.name}</b></td>
+      <td>${b.content}</td>
+      <td>${b.unit}</td>
+      <td><b>${b.stock}</b></td>
+      <td>${rupiah(b.cost)}</td>
+      <td>${rupiah(total)}</td>
+      <td><span class="badge ${low?'warn':'ok'}">${low?'Menipis':'Aman'}</span></td>
+      <td style="white-space:nowrap">
+        <button class="btn" type="button" onclick="editBahan(${b.id})">Edit</button>
+        <button class="btn" type="button" onclick="deleteBahan(${b.id})">Hapus</button>
+      </td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8"><div class="empty">Belum ada bahan. Klik + Tambah Bahan untuk mulai.</div></td></tr>';
+}
+function renderMenuTable(){
+  const el=document.getElementById('menuTableBahan');
+  if(!el)return;
+  el.innerHTML=db.menus.map(m=>{
+    const hpp=calcRecipeCost(recipeForMenu(m.id).items||[]);
+    const profit=(+m.price||0)-hpp;
+    const foodCost=(+m.price||0)>0?(hpp/(+m.price)*100):0;
+    return `<tr>
+      <td><b>${m.emoji||'☕'} ${m.name}</b></td><td>${m.cat}</td>
+      <td>${rupiah(m.price)}</td><td>${rupiah(hpp)}</td><td><b>${rupiah(profit)}</b></td>
+      <td>${foodCost.toFixed(1)}%</td><td><span class="badge ${m.active!==false?'ok':''}">${m.active!==false?'Aktif':'Nonaktif'}</span></td>
+      <td style="white-space:nowrap"><button class="btn" type="button" onclick="editMenu(${m.id})">Edit</button> <button class="btn" type="button" onclick="deleteMenu(${m.id})">Hapus</button></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8"><div class="empty">Belum ada menu. Klik + Tambah Menu untuk membuat menu.</div></td></tr>';
+}
+function openBahanModal(id=null){
+  const b=id?db.bahan.find(x=>x.id===id):{name:'',content:1,unit:'gram',stock:0,cost:0,min:0,active:true};
+  openModal(id?'Edit Bahan':'Tambah Bahan',`
+    <div class="form-grid">
+      <div class="field full"><label>NAMA BAHAN</label><input id="bName" value="${b.name||''}" placeholder="Contoh: Kopi"></div>
+      <div class="field"><label>ISI / KEMASAN</label><input id="bContent" type="number" min="0.001" step="any" value="${b.content||1}"></div>
+      <div class="field"><label>SATUAN DASAR</label><select id="bUnit"><option value="gram" ${b.unit==='gram'?'selected':''}>gram</option><option value="ml" ${b.unit==='ml'?'selected':''}>ml</option><option value="pcs" ${b.unit==='pcs'?'selected':''}>pcs</option></select></div>
+      <div class="field"><label>JUMLAH STOK</label><input id="bStock" type="number" min="0" step="any" value="${b.stock||0}"></div>
+      <div class="field"><label>HARGA / PCS</label><input id="bCost" type="number" min="0" step="any" value="${b.cost||0}"></div>
+      <div class="field"><label>MINIMUM STOK</label><input id="bMin" type="number" min="0" step="any" value="${b.min||0}"></div>
+      <div class="field full"><div class="recipe-cost">Harga dasar: <b id="bBaseCost">${rupiah(baseCostOf(b))}/${b.unit||'pcs'}</b><div class="hint">Harga dasar = harga kemasan ÷ isi kemasan. Nilai ini digunakan otomatis saat menghitung HPP.</div></div></div>
+    </div>
+    <button class="btn primary" style="margin-top:1rem" onclick="saveBahan(${id||0})">Simpan Bahan</button>`);
+  const refresh=()=>{const c=+(document.getElementById('bContent')?.value||0),p=+(document.getElementById('bCost')?.value||0),u=document.getElementById('bUnit')?.value||'pcs';const out=document.getElementById('bBaseCost');if(out)out.textContent=rupiah(c>0?p/c:0)+'/'+u};
+  document.getElementById('bContent').oninput=refresh;document.getElementById('bCost').oninput=refresh;document.getElementById('bUnit').onchange=refresh;
+}
+function editBahan(id){openBahanModal(id)}
+function saveBahan(id){
+  const name=document.getElementById('bName').value.trim();
+  const content=+(document.getElementById('bContent').value||0);
+  const unit=document.getElementById('bUnit').value;
+  const stock=+(document.getElementById('bStock').value||0);
+  const cost=+(document.getElementById('bCost').value||0);
+  const min=+(document.getElementById('bMin').value||0);
+  if(!name)return toast('Nama bahan wajib diisi');
+  if(content<=0)return toast('Isi kemasan harus lebih dari 0');
+  if(stock<0||cost<0||min<0)return toast('Nilai stok/harga tidak valid');
+  const duplicate=db.bahan.find(x=>x.name.toLowerCase()===name.toLowerCase() && x.id!==id);
+  if(duplicate)return toast('Nama bahan sudah ada');
+  const old=id?db.bahan.find(x=>x.id===id):null;
+  const x={id:id||db.nextId++,name,content,unit,stock,cost,min,active:old?old.active:true};
+  if(id)db.bahan=db.bahan.map(b=>b.id===id?x:b);else db.bahan.push(x);
+  save();closeModal();renderAll();toast(id?'Bahan diperbarui':'Bahan berhasil ditambahkan');
+}
+function deleteBahan(id){
+  const b=db.bahan.find(x=>x.id===id);if(!b)return;
+  const used=db.recipes.some(r=>(r.items||[]).some(it=>it[0]===b.name));
+  if(used){
+    if(!confirm(`Bahan "${b.name}" digunakan dalam resep. Hapus bahan dan hapus pemakaiannya dari resep?`))return;
+    db.recipes=db.recipes.map(r=>({...r,items:(r.items||[]).filter(it=>it[0]!==b.name)}));
+  }else if(!confirm(`Hapus bahan "${b.name}"?`))return;
+  db.bahan=db.bahan.filter(x=>x.id!==id);save();renderAll();toast('Bahan dihapus');
 }
 function recipeRowsHtml(items=[]){
   if(!items.length)return '<div class="recipe-empty" id="recipeEmpty">Belum ada bahan dalam resep.</div>';
@@ -445,6 +537,14 @@ function transactionSnapshotText(t){
     const h=+(i.hpp||0);
     return `${i.name} ×${i.qty} — HPP ${rupiah(h)}`;
   }).join(' | ');
+}
+function renderExpenses(){
+  const el=document.getElementById('expenseTable');if(!el)return;
+  el.innerHTML=db.expenses.slice().reverse().map((e,i)=>`<tr><td>${e.date}</td><td>${e.cat}</td><td>${e.note}</td><td><b>${rupiah(e.amount)}</b></td><td><button class="btn" onclick="deleteExpense(${db.expenses.length-1-i})">Hapus</button></td></tr>`).join('')||'<tr><td colspan="5"><div class="empty">Belum ada pengeluaran.</div></td></tr>';
+}
+function renderReport(){
+  const el=document.getElementById('reportTable');if(!el)return;
+  el.innerHTML=db.transactions.slice().reverse().map(t=>{const hpp=getTransactionHpp(t);return `<tr><td>${t.date} ${t.time}</td><td>${(t.items||[]).map(i=>i.name+' ×'+i.qty).join(', ')}</td><td>${t.pay}</td><td>${rupiah(t.total)}</td><td>${rupiah(hpp)}</td><td><b>${rupiah(t.total-hpp)}</b></td></tr>`}).join('')||'<tr><td colspan="6"><div class="empty">Belum ada transaksi.</div></td></tr>';
 }
 function renderAll(){metrics();renderRecent();renderLow();renderCats();renderProducts();renderCart();renderMenuTable();renderBahan();renderExpenses();renderReport();shopName.value=db.settings.name;shopPhone.value=db.settings.phone;shopAddress.value=db.settings.address}
 renderAll();
