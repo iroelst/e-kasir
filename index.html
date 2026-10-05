@@ -137,6 +137,7 @@ let db=JSON.parse(localStorage.getItem(KEY)||'null')||{
   transactions:[],
   expenses:[],
   stockMoves:[],
+  purchases:[],
   stockPeriods:{},
   nextId:1
 };
@@ -147,6 +148,8 @@ db.recipes = Array.isArray(db.recipes) ? db.recipes : [];
 db.transactions = Array.isArray(db.transactions) ? db.transactions : [];
 db.expenses = Array.isArray(db.expenses) ? db.expenses : [];
 db.stockMoves = Array.isArray(db.stockMoves) ? db.stockMoves : [];
+// Pembelian disimpan dalam ledger khusus agar selalu menjadi sumber stok masuk.
+if(!Array.isArray(db.purchases)) db.purchases = db.stockMoves.filter(m=>m && m.type==='purchase').map(m=>({...m}));
 db.stockPeriods = db.stockPeriods && typeof db.stockPeriods==='object' ? db.stockPeriods : {};
 db.nextId = Number.isFinite(+db.nextId) ? +db.nextId : 1;
 // Struktur bahan: harga selalu harga 1 kemasan utuh, stok memakai satuan dasar.
@@ -169,7 +172,7 @@ function ensurePeriod(key,from,to){
 }
 function inRange(date,from,to){return String(date||'')>=from&&String(date||'')<=to}
 function rangeTransactions(from,to){return db.transactions.filter(t=>inRange(t.date,from,to))}
-function rangePurchases(from,to){return db.stockMoves.filter(m=>m.type==='purchase'&&inRange(m.date,from,to))}
+function rangePurchases(from,to){return db.purchases.filter(m=>m.type==='purchase'&&inRange(m.date,from,to))}
 function recipeItemParts(item){if(Array.isArray(item))return {name:item[0],qty:+item[1]||0};const b=db.bahan.find(x=>x.id===item?.bahanId);return {name:b?.name||item?.name||'',qty:+item?.qty||0}}
 function usageForRange(b,from,to){let used=0;rangeTransactions(from,to).forEach(t=>(t.items||[]).forEach(it=>{let r=db.recipes.find(x=>x.menuId===it.id);if(r)r.items.forEach(item=>{const z=recipeItemParts(item);if(z.name===b.name)used+=z.qty*(+it.qty||0)})}));return used}
 function stockSummary(b,from,to){const key=rangeKey(from,to),p=ensurePeriod(key,from,to),opening=+(p.opening[b.id]??0),purchases=rangePurchases(from,to).filter(x=>x.bahanId===b.id).reduce((a,x)=>a+(+x.qty||0),0),used=usageForRange(b,from,to),ending=opening+purchases-used;p.ending[b.id]=ending;return {opening,purchases,used,ending}}
