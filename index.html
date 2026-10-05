@@ -128,7 +128,8 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
 <div class="toast" id="toast"></div>
 
 <script>
-const KEY='kopikasir_v1';
+// Versi penyimpanan baru agar data localStorage versi lama tidak ikut terbaca.
+const KEY='kopikasir_v2';
 let db=JSON.parse(localStorage.getItem(KEY)||'null')||{
   settings:{name:'KopiKasir Coffee',phone:'',address:''},
   menus:[],
@@ -324,7 +325,11 @@ function savePurchase(){
  if(b.unit==='pcs'&&!Number.isInteger(n))return toast('Jumlah kemasan untuk bahan pcs harus bilangan bulat');
  if(price<0)return toast('Harga kemasan tidak valid');
  const qty=n*b.content;
- db.stockMoves.push({id:db.nextId++,type:'purchase',date,bahanId:b.id,bahanName:b.name,packages:n,qty,unit:b.unit,cost:price,total:n*price,note:pNote.value.trim()});
+ // Satu transaksi pembelian dicatat ke ledger pembelian dan stockMoves.
+ // rangePurchases() membaca db.purchases, jadi db.purchases wajib diisi saat pembelian disimpan.
+ const purchase={id:db.nextId++,type:'purchase',date,bahanId:b.id,bahanName:b.name,packages:n,qty,unit:b.unit,cost:price,total:n*price,note:pNote.value.trim()};
+ db.purchases.push({...purchase});
+ db.stockMoves.push({...purchase});
  // Pembelian adalah stok masuk. Tidak perlu dimasukkan lagi sebagai stok awal.
  const p=ensurePeriod(rangeKey(r.from,r.to),r.from,r.to);
  p.ending[b.id]=+(p.opening[b.id]??0)+rangePurchases(r.from,r.to).filter(x=>x.bahanId===b.id).reduce((a,x)=>a+(+x.qty||0),0)-usageForRange(b,r.from,r.to);
