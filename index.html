@@ -130,30 +130,24 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
 const KEY='kopikasir_v1';
 let db=JSON.parse(localStorage.getItem(KEY)||'null')||{
   settings:{name:'KopiKasir Coffee',phone:'',address:''},
-  menus:[
-   {id:1,name:'Es Kopi Susu',cat:'Kopi',price:15000,hpp:5000,active:true,emoji:'🥤'},
-   {id:2,name:'Americano',cat:'Kopi',price:12000,hpp:3500,active:true,emoji:'☕'},
-   {id:3,name:'Cappuccino',cat:'Kopi',price:18000,hpp:6500,active:true,emoji:'☕'},
-   {id:4,name:'Matcha Latte',cat:'Non-Kopi',price:17000,hpp:7000,active:true,emoji:'🍵'},
-   {id:5,name:'Teh Manis',cat:'Non-Kopi',price:7000,hpp:1500,active:true,emoji:'🫖'},
-   {id:6,name:'Kentang Goreng',cat:'Makanan',price:15000,hpp:6500,active:true,emoji:'🍟'}
-  ],
-  bahan:[
-   {id:1,name:'Biji Kopi',unit:'gram',cost:100,stock:1000,min:200},
-   {id:2,name:'Susu UHT',unit:'ml',cost:15,stock:3000,min:500},
-   {id:3,name:'Gula',unit:'gram',cost:20,stock:1000,min:200},
-   {id:4,name:'Cup 16 oz',unit:'pcs',cost:500,stock:80,min:20},
-   {id:5,name:'Bubuk Matcha',unit:'gram',cost:300,stock:250,min:50}
-  ],
-  recipes:[
-   {menuId:1,items:[['Biji Kopi',18],['Susu UHT',100],['Gula',20],['Cup 16 oz',1]]},
-   {menuId:4,items:[['Bubuk Matcha',8],['Susu UHT',100],['Gula',15],['Cup 16 oz',1]]}
-  ],
-  transactions:[], expenses:[], stockMoves:[], stockPeriods:{}, nextId:20
+  menus:[],
+  bahan:[],
+  recipes:[],
+  transactions:[],
+  expenses:[],
+  stockMoves:[],
+  stockPeriods:{},
+  nextId:1
 };
-// Migrasi data lama agar fitur stok bulanan aman digunakan.
+// Normalisasi struktur data tanpa menambahkan data demo.
+db.menus = Array.isArray(db.menus) ? db.menus : [];
+db.bahan = Array.isArray(db.bahan) ? db.bahan : [];
+db.recipes = Array.isArray(db.recipes) ? db.recipes : [];
+db.transactions = Array.isArray(db.transactions) ? db.transactions : [];
+db.expenses = Array.isArray(db.expenses) ? db.expenses : [];
 db.stockMoves = Array.isArray(db.stockMoves) ? db.stockMoves : [];
 db.stockPeriods = db.stockPeriods && typeof db.stockPeriods==='object' ? db.stockPeriods : {};
+db.nextId = Number.isFinite(+db.nextId) ? +db.nextId : 1;
 function periodKey(v){return v || new Date().toISOString().slice(0,7)}
 function ensurePeriod(key){
  if(db.stockPeriods[key]) return db.stockPeriods[key];
@@ -167,8 +161,13 @@ function ensurePeriod(key){
 }
 function monthTransactions(key){return db.transactions.filter(t=>String(t.date||'').slice(0,7)===key)}
 function monthPurchases(key){return db.stockMoves.filter(m=>m.type==='purchase' && m.date.slice(0,7)===key)}
+function recipeItemParts(item){
+ if(Array.isArray(item)) return {name:item[0],qty:+item[1]||0};
+ const b=db.bahan.find(x=>x.id===item?.bahanId);
+ return {name:b?.name||item?.name||'',qty:+item?.qty||0};
+}
 function usageForMonth(b,key){
- let used=0; monthTransactions(key).forEach(t=>{(t.items||[]).forEach(it=>{let r=db.recipes.find(x=>x.menuId===it.id);if(r) r.items.forEach(([name,q])=>{if(name===b.name) used+=(+q||0)*(+it.qty||0)})})});
+ let used=0; monthTransactions(key).forEach(t=>{(t.items||[]).forEach(it=>{let r=db.recipes.find(x=>x.menuId===it.id);if(r) r.items.forEach(item=>{const z=recipeItemParts(item);if(z.name===b.name) used+=z.qty*(+it.qty||0)})})});
  return used;
 }
 function stockSummary(b,key){
@@ -177,6 +176,7 @@ function stockSummary(b,key){
 }
 let cart=[], pay='Tunai', activeCat='Semua';
 const rupiah=n=>new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n||0);
+const formatQty=n=>Number.isInteger(+n)?String(+n):String(Number(+n).toFixed(2)).replace(/\.?0+$/,'');
 const save=()=>localStorage.setItem(KEY,JSON.stringify(db));
 const today=()=>new Date().toISOString().slice(0,10);
 function toast(s){let e=document.getElementById('toast');e.textContent=s;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),1800)}
@@ -198,7 +198,7 @@ function metrics(){
  rLaba.textContent=rupiah(totalO-totalH);rNet.textContent=rupiah(totalO-totalH-totalE);
 }
 function renderRecent(){let x=todayTx().slice(-6).reverse();recent.innerHTML=x.length?x.map(t=>`<div class="cart-item"><div><b>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</b><small style="display:block;color:var(--muted)">${t.time} · ${t.pay}</small></div><b>${rupiah(t.total)}</b></div>`).join(''):'<div class="empty">Belum ada transaksi hari ini.</div>'}
-function renderLow(){let x=db.bahan.filter(b=>b.stock<=b.min);lowStock.innerHTML=x.length?x.map(b=>`<div class="cart-item"><div><b>${b.name}</b><small style="display:block;color:var(--muted)">${b.stock} ${b.unit} tersisa</small></div><span class="badge warn">Menipis</span></div>`).join(''):'<div class="empty">Semua stok aman ✓</div>'}
+function renderLow(){const key=today().slice(0,7);let x=db.bahan.map(b=>({b,s:stockSummary(b,key)})).filter(x=>x.s.ending<=(+x.b.min||0));lowStock.innerHTML=x.length?x.map(({b,s})=>`<div class="cart-item"><div><b>${b.name}</b><small style="display:block;color:var(--muted)">${formatQty(Math.max(0,s.ending))} ${b.unit} tersisa</small></div><span class="badge warn">Menipis</span></div>`).join(''):'<div class="empty">Semua stok aman ✓</div>'}
 
 function renderCats(){let cats=['Semua',...new Set(db.menus.map(m=>m.cat))];catsEl= document.getElementById('cats');catsEl.innerHTML=cats.map(c=>`<button class="cat ${c===activeCat?'active':''}" onclick="activeCat='${c}';renderProducts();renderCats()">${c}</button>`).join('')}
 function renderProducts(){let q=(document.getElementById('posSearch')?.value||'').toLowerCase();let a=db.menus.filter(m=>m.active&&(activeCat==='Semua'||m.cat===activeCat)&&m.name.toLowerCase().includes(q));products.innerHTML=a.map(m=>`<div class="product" onclick="addCart(${m.id})"><div class="emoji">${m.emoji||'☕'}</div><h3>${m.name}</h3><p>${m.cat}</p><div class="row"><span class="price">${rupiah(m.price)}</span><button class="mini">Tambah</button></div></div>`).join('')||'<div class="empty" style="grid-column:1/-1">Menu tidak ditemukan.</div>'}
@@ -210,12 +210,12 @@ document.querySelectorAll('.pay button').forEach(b=>b.onclick=()=>{pay=b.dataset
 function checkout(){
  if(!cart.length)return toast('Keranjang masih kosong');
  const key=today().slice(0,7), need={};
- cart.forEach(it=>{const r=db.recipes.find(x=>x.menuId===it.id);if(r)r.items.forEach(([name,q])=>need[name]=(need[name]||0)+(+q||0)*(+it.qty||0))});
+ cart.forEach(it=>{const r=db.recipes.find(x=>x.menuId===it.id);if(r)r.items.forEach(item=>{const z=recipeItemParts(item);if(z.name)need[z.name]=(need[z.name]||0)+z.qty*(+it.qty||0)})});
  for(const name in need){const b=db.bahan.find(x=>x.name===name);if(!b)continue;const avail=stockSummary(b,key).ending;if(avail<need[name]-1e-9)return toast(`Stok ${name} tidak cukup`)}
  let total=cart.reduce((a,i)=>a+i.price*i.qty,0),hpp=cart.reduce((a,i)=>a+i.hpp*i.qty,0),d=new Date();
  db.transactions.push({id:db.nextId++,date:today(),time:d.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}),items:cart.map(i=>({...i})),total,hpp,pay});
  // Stok fisik dikurangi oleh penjualan melalui resep.
- cart.forEach(it=>{const r=db.recipes.find(x=>x.menuId===it.id);if(r)r.items.forEach(([name,q])=>{const b=db.bahan.find(x=>x.name===name);if(b)b.stock=Math.max(0,(+b.stock||0)-(+q||0)*(+it.qty||0));})});
+ cart.forEach(it=>{const r=db.recipes.find(x=>x.menuId===it.id);if(r)r.items.forEach(item=>{const z=recipeItemParts(item);const b=db.bahan.find(x=>x.name===z.name);if(b)b.stock=Math.max(0,(+b.stock||0)-z.qty*(+it.qty||0));})});
  save();toast('Transaksi berhasil disimpan');cart=[];renderAll();
 }
 function renderMenuTable(){let q=(menuSearch.value||'').toLowerCase();let a=db.menus.filter(m=>m.name.toLowerCase().includes(q));menuTable.innerHTML=a.map(m=>`<tr><td><b>${m.emoji||'☕'} ${m.name}</b></td><td>${m.cat}</td><td>${rupiah(m.price)}</td><td>${rupiah(m.hpp)}</td><td><b>${rupiah(m.price-m.hpp)}</b></td><td><span class="badge ${m.active?'ok':''}">${m.active?'Aktif':'Nonaktif'}</span></td><td><button class="btn" onclick="editMenu(${m.id})">Edit</button></td></tr>`).join('')}
@@ -223,11 +223,17 @@ function renderBahan(){
  const key=document.getElementById('stockMonth')?.value||periodKey(); ensurePeriod(key);
  const p=db.stockPeriods[key];
  let openingTotal=0,purchaseTotal=0,usageTotal=0,endingTotal=0;
- bahanTable.innerHTML=db.bahan.map(b=>{const x=stockSummary(b,key);openingTotal+=x.opening*(+b.cost||0);purchaseTotal+=monthPurchases(key).filter(m=>m.bahanId===b.id).reduce((a,m)=>a+(+m.total||0),0);usageTotal+=x.used*(+b.cost||0);endingTotal+=x.ending*(+b.cost||0);return `<tr><td><b>${b.name}</b></td><td>${b.unit}</td><td>${rupiah(b.cost)}</td><td>${x.opening}</td><td>${x.purchases}</td><td>${x.used}</td><td><b>${x.ending}</b></td><td><span class="badge ${x.ending>b.min?'ok':'warn'}">${x.ending>b.min?'Aman':'Menipis'}</span></td><td><button class="btn" onclick="editBahan(${b.id})">Edit</button></td></tr>`}).join('')||'<tr><td colspan="9"><div class="empty">Belum ada bahan.</div></td></tr>';
- stockOpeningTotal.textContent=rupiah(openingTotal);stockPurchaseTotal.textContent=rupiah(purchaseTotal);stockUsageTotal.textContent=rupiah(usageTotal);stockEndingTotal.textContent=rupiah(endingTotal);
+ bahanTable.innerHTML=db.bahan.map(b=>{
+   const x=stockSummary(b,key);
+   const purchaseValue=monthPurchases(key).filter(m=>m.bahanId===b.id).reduce((a,m)=>a+(+m.total||0),0);
+   openingTotal+=x.opening*(+b.cost||0); purchaseTotal+=purchaseValue; usageTotal+=x.used*(+b.cost||0); endingTotal+=Math.max(0,x.ending)*(+b.cost||0);
+   const safe=x.ending>(+b.min||0);
+   return `<tr><td><b>${b.name}</b></td><td>${b.unit}</td><td>${rupiah(b.cost)}</td><td>${formatQty(x.opening)}</td><td>${formatQty(x.purchases)}</td><td>${formatQty(x.used)}</td><td><b>${formatQty(Math.max(0,x.ending))}</b></td><td><span class=\"badge ${safe?'ok':'warn'}\">${safe?'Aman':'Menipis'}</span></td><td><button class=\"btn\" onclick=\"editBahan(${b.id})\">Edit</button></td></tr>`;
+ }).join('')||'<tr><td colspan=\"9\"><div class=\"empty\">Belum ada bahan. Tambahkan bahan terlebih dahulu.</div></td></tr>';
+ stockOpeningTotal.textContent=rupiah(openingTotal); stockPurchaseTotal.textContent=rupiah(purchaseTotal); stockUsageTotal.textContent=rupiah(usageTotal); stockEndingTotal.textContent=rupiah(endingTotal);
  stockPeriodStatus.textContent=p.closed?'Periode ditutup':'Periode aktif';
- purchaseTable.innerHTML=monthPurchases(key).slice().reverse().map(m=>`<tr><td>${m.date}</td><td><b>${m.bahanName}</b></td><td>${m.qty} ${m.unit}</td><td>${rupiah(m.cost)}</td><td>${rupiah(m.total)}</td><td>${m.note||'-'}</td></tr>`).join('')||'<tr><td colspan="6"><div class="empty">Belum ada pembelian bulan ini.</div></td></tr>';
- recipeInfo.innerHTML=db.recipes.length?db.recipes.map(r=>{let m=db.menus.find(x=>x.id===r.menuId);let cost=r.items.reduce((ss,[n,q])=>ss+(db.bahan.find(b=>b.name===n)?.cost||0)*q,0);return `<div class="cart-item"><div><b>${m?.name||'Menu'}</b><small style="display:block;color:var(--muted)">${r.items.map(x=>x[0]+' '+x[1]).join(' · ')}</small></div><b>${rupiah(cost)}</b></div>`}).join(''):'<div class="empty">Belum ada resep.</div>';
+ purchaseTable.innerHTML=monthPurchases(key).slice().reverse().map(m=>`<tr><td>${m.date}</td><td><b>${m.bahanName}</b></td><td>${formatQty(m.qty)} ${m.unit}</td><td>${rupiah(m.cost)}</td><td>${rupiah(m.total)}</td><td>${m.note||'-'}</td></tr>`).join('')||'<tr><td colspan=\"6\"><div class=\"empty\">Belum ada pembelian bulan ini.</div></td></tr>';
+ recipeInfo.innerHTML=db.recipes.length?db.recipes.map(r=>{let m=db.menus.find(x=>x.id===r.menuId);let cost=r.items.reduce((ss,item)=>{const z=recipeItemParts(item);return ss+(db.bahan.find(b=>b.name===z.name)?.cost||0)*z.qty},0);return `<div class=\"cart-item\"><div><b>${m?.name||'Menu'}</b><small style=\"display:block;color:var(--muted)\">${r.items.map(item=>{const z=recipeItemParts(item);return z.name+' '+formatQty(z.qty)}).join(' · ')}</small></div><b>${rupiah(cost)}</b></div>`}).join(''):'<div class=\"empty\">Belum ada resep. Buat menu dan susun resepnya untuk menghitung HPP otomatis.</div>';
 }
 function changeStockMonth(v){if(!v)return;ensurePeriod(v);save();renderBahan()}
 function openOpeningModal(){
@@ -254,9 +260,28 @@ function closeStockPeriod(){const key=document.getElementById('stockMonth')?.val
 function renderExpenses(){expenseTable.innerHTML=db.expenses.slice().reverse().map((e,i)=>`<tr><td>${e.date}</td><td>${e.cat}</td><td>${e.note}</td><td><b>${rupiah(e.amount)}</b></td><td><button class="btn" onclick="deleteExpense(${db.expenses.length-1-i})">Hapus</button></td></tr>`).join('')||'<tr><td colspan="5"><div class="empty">Belum ada pengeluaran.</div></td></tr>'}
 function renderReport(){reportTable.innerHTML=db.transactions.slice().reverse().map(t=>`<tr><td>${t.date} ${t.time}</td><td>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</td><td>${t.pay}</td><td>${rupiah(t.total)}</td><td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td></tr>`).join('')||'<tr><td colspan="6"><div class="empty">Belum ada transaksi.</div></td></tr>'}
 function openModal(title,body){modalTitle.textContent=title;modalBody.innerHTML=body;modal.classList.add('show')}function closeModal(){modal.classList.remove('show')}
-function openMenuModal(id=null){let m=id?db.menus.find(x=>x.id===id):{name:'',cat:'Kopi',price:'',hpp:'',emoji:'☕',active:true};openModal(id?'Edit Menu':'Tambah Menu',`<div class="form-grid"><div class="field"><label>NAMA MENU</label><input id="fName" value="${m.name}"></div><div class="field"><label>KATEGORI</label><input id="fCat" value="${m.cat}"></div><div class="field"><label>HARGA JUAL</label><input id="fPrice" type="number" value="${m.price}"></div><div class="field"><label>HPP / PORSI</label><input id="fHpp" type="number" value="${m.hpp}"></div><div class="field"><label>IKON</label><input id="fEmoji" value="${m.emoji||'☕'}"></div></div><button class="btn primary" style="margin-top:15px" onclick="saveMenu(${id||0})">Simpan</button>`)}
+let menuRecipeDraft=[];
+function recipeCost(items){return items.reduce((sum,item)=>{const b=db.bahan.find(x=>x.id===+item.bahanId);return sum+(b?(+b.cost||0)*(+item.qty||0):0)},0)}
+function renderRecipeRows(){
+ const el=document.getElementById('recipeRows'); if(!el)return;
+ const opts=db.bahan.map(b=>`<option value=\"${b.id}\">${b.name} (${b.unit})</option>`).join('');
+ el.innerHTML=menuRecipeDraft.map((r,i)=>`<div class=\"form-grid\" style=\"margin-bottom:8px;align-items:end\"><div class=\"field\"><label>BAHAN</label><select id=\"riB_${i}\" onchange=\"updateRecipeDraft(${i})\"><option value=\"\">Pilih bahan...</option>${opts}</select></div><div class=\"field\"><label>PEMAKAIAN / PORSI</label><input id=\"riQ_${i}\" type=\"number\" step=\"0.01\" min=\"0\" value=\"${r.qty||''}\" oninput=\"updateRecipeDraft(${i})\"></div><div class=\"field\"><button class=\"btn\" onclick=\"removeRecipeRow(${i})\">Hapus</button></div></div>`).join('')||'<div class=\"empty\">Belum ada bahan dalam resep.</div>';
+ menuRecipeDraft.forEach((r,i)=>{const e=document.getElementById('riB_'+i);if(e)e.value=r.bahanId||''});
+ const h=recipeCost(menuRecipeDraft); const hp=document.getElementById('fHpp'); if(hp)hp.value=h;
+ const fc=document.getElementById('foodCostPreview'); const price=+(document.getElementById('fPrice')?.value||0); if(fc)fc.textContent=price>0?((h/price)*100).toFixed(1)+'%':'-';
+}
+function updateRecipeDraft(i){const b=document.getElementById('riB_'+i),q=document.getElementById('riQ_'+i);if(b)menuRecipeDraft[i].bahanId=+b.value||0;if(q)menuRecipeDraft[i].qty=+q.value||0;renderRecipeRows()}
+function addRecipeRow(){menuRecipeDraft.push({bahanId:db.bahan[0]?.id||0,qty:0});renderRecipeRows()}
+function removeRecipeRow(i){menuRecipeDraft.splice(i,1);renderRecipeRows()}
+function openMenuModal(id=null){
+ let m=id?db.menus.find(x=>x.id===id):{name:'',cat:'Minuman',price:'',hpp:0,emoji:'☕',active:true};
+ const r=db.recipes.find(x=>x.menuId===id);
+ menuRecipeDraft=(r?.items||[]).map(item=>Array.isArray(item)?{bahanId:db.bahan.find(b=>b.name===item[0])?.id||0,qty:+item[1]||0}:{bahanId:+item.bahanId||0,qty:+item.qty||0});
+ openModal(id?'Edit Menu':'Tambah Menu',`<div class=\"form-grid\"><div class=\"field\"><label>NAMA MENU</label><input id=\"fName\" value=\"${m.name}\"></div><div class=\"field\"><label>KATEGORI</label><select id=\"fCat\"><option ${m.cat==='Minuman'?'selected':''}>Minuman</option><option ${m.cat==='Makanan'?'selected':''}>Makanan</option><option ${m.cat==='Snack'?'selected':''}>Snack</option></select></div><div class=\"field\"><label>HARGA JUAL</label><input id=\"fPrice\" type=\"number\" value=\"${m.price}\" oninput=\"renderRecipeRows()\"></div><div class=\"field\"><label>HPP / PORSI</label><input id=\"fHpp\" type=\"number\" value=\"${m.hpp||0}\" readonly></div><div class=\"field\"><label>FOOD COST</label><input id=\"foodCostPreview\" value=\"-\" readonly></div><div class=\"field\"><label>IKON</label><input id=\"fEmoji\" value=\"${m.emoji||'☕'}\"></div></div><div style=\"margin-top:15px\"><div class=\"section-title\"><h3 style=\"margin:0\">Resep</h3><button class=\"btn\" onclick=\"addRecipeRow()\">+ Tambah Bahan</button></div><div id=\"recipeRows\"></div></div><button class=\"btn primary\" style=\"margin-top:15px\" onclick=\"saveMenu(${id||0})\">Simpan</button>`);
+ renderRecipeRows();
+}
 function editMenu(id){openMenuModal(id)}
-function saveMenu(id){let x={id:id||db.nextId++,name:fName.value,cat:fCat.value||'Lainnya',price:+fPrice.value||0,hpp:+fHpp.value||0,emoji:fEmoji.value||'☕',active:true};if(id)db.menus=db.menus.map(m=>m.id===id?x:m);else db.menus.push(x);save();closeModal();renderAll();toast('Menu tersimpan')}
+function saveMenu(id){const valid=menuRecipeDraft.filter(r=>r.bahanId&&r.qty>0);const hpp=recipeCost(valid);if(!fName.value.trim())return toast('Nama menu wajib diisi');if(!+fPrice.value)return toast('Harga jual wajib diisi');if(!valid.length)return toast('Tambahkan minimal satu bahan ke resep');let x={id:id||db.nextId++,name:fName.value.trim(),cat:fCat.value,price:+fPrice.value,hpp,emoji:fEmoji.value||'☕',active:true};if(id)db.menus=db.menus.map(m=>m.id===id?x:m);else db.menus.push(x);const rec={menuId:x.id,items:valid.map(r=>({bahanId:+r.bahanId,qty:+r.qty}))};const idx=db.recipes.findIndex(r=>r.menuId===x.id);if(idx>=0)db.recipes[idx]=rec;else db.recipes.push(rec);save();closeModal();renderAll();toast('Menu & resep tersimpan')}
 function openBahanModal(id=null){let b=id?db.bahan.find(x=>x.id===id):{name:'',unit:'gram',cost:'',stock:'',min:''};openModal(id?'Edit Bahan':'Tambah Bahan',`<div class="form-grid"><div class="field"><label>NAMA BAHAN</label><input id="bName" value="${b.name}"></div><div class="field"><label>SATUAN</label><input id="bUnit" value="${b.unit}"></div><div class="field"><label>HARGA / SATUAN</label><input id="bCost" type="number" value="${b.cost}"></div><div class="field"><label>STOK</label><input id="bStock" type="number" value="${b.stock}"></div><div class="field"><label>MINIMUM STOK</label><input id="bMin" type="number" value="${b.min}"></div></div><button class="btn primary" style="margin-top:15px" onclick="saveBahan(${id||0})">Simpan</button>`)}
 function editBahan(id){openBahanModal(id)}
 function saveBahan(id){let x={id:id||db.nextId++,name:bName.value,unit:bUnit.value||'pcs',cost:+bCost.value||0,stock:+bStock.value||0,min:+bMin.value||0};if(id)db.bahan=db.bahan.map(b=>b.id===id?x:b);else db.bahan.push(x);save();closeModal();renderAll();toast('Bahan tersimpan')}
