@@ -1780,6 +1780,8 @@
         }
         // ===== MODAL + RESEP HELPERS =====
         let menuRecipeDraft = [];
+let returnToPurchase = false;
+let pendingPurchaseBahanId = null;
 
         function openModal(title, html) {
             const modal = document.getElementById('modal');
@@ -2279,11 +2281,16 @@
 
         function saveBahan(id) {
             const old = id ? db.bahan.find(b => b.id === id) : null;
-            const name = bName.value.trim(),
-                unit = bUnit.value,
-                content = +bContent.value || 0,
-                cost = +bCost.value || 0,
-                min = +bMin.value || 0;
+            const nameEl = document.getElementById('bName');
+            const unitEl = document.getElementById('bUnit');
+            const contentEl = document.getElementById('bContent');
+            const costEl = document.getElementById('bCost');
+            const minEl = document.getElementById('bMin');
+            const name = (nameEl?.value || '').trim(),
+                unit = unitEl?.value || 'gram',
+                content = +((contentEl?.value) || 0),
+                cost = +((costEl?.value) || 0),
+                min = +((minEl?.value) || 0);
             if (!name) return toast('Nama bahan wajib diisi');
             if (content <= 0) return toast('Isi kemasan harus lebih dari 0');
             if (cost < 0) return toast('Harga kemasan tidak valid');
@@ -2324,7 +2331,8 @@
             openModal('Form Pembelian Bahan', `<p style="margin-top:0;color:var(--muted);font-size:13px">Gunakan form ini setiap kali membeli bahan. Jumlah diisi dalam <b>kemasan</b>; sistem otomatis menghitung isi yang masuk, menambah Tampil Stok, dan mencatat Riwayat Pembelian.</p><div class="form-grid"><div class="field full"><label>BAHAN</label><select id="pBahan" onchange="updatePurchasePreview()">${opts}</select><button type="button" class="btn" style="margin-top:8px" onclick="openBahanForPurchase()">＋ Tambah Bahan Baru</button></div><div class="field"><label>TANGGAL PEMBELIAN</label><input id="pDate" type="date" value="${defaultDate}" min="${r.from}" max="${r.to}"></div><div class="field"><label>JUMLAH KEMASAN</label><input id="pPackages" type="number" step="1" min="1" value="1" oninput="updatePurchasePreview()"></div><div class="field"><label>HARGA / KEMASAN</label><input id="pCost" type="number" min="0" oninput="updatePurchasePreview()"></div><div class="field"><label>ISI MASUK</label><input id="pQty" readonly></div><div class="field full"><label>KETERANGAN</label><input id="pNote" placeholder="Contoh: pembelian stok"></div></div><div id="purchasePreview" style="margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:var(--muted)"></div><button class="btn primary" style="margin-top:15px" onclick="savePurchase()">Simpan Pembelian</button>`);
             const b = db.bahan.find(x => x.id === selectedId) || db.bahan[0];
             if (pendingPurchaseBahanId !== null) pendingPurchaseBahanId = null;
-            pCost.value = b.cost;
+            const pCostEl = document.getElementById('pCost');
+            if (pCostEl) pCostEl.value = b.cost;
             updatePurchasePreview();
         }
 
@@ -2344,10 +2352,15 @@
         }
 
         function savePurchase() {
-            const b = db.bahan.find(x => x.id === +(pBahan.value || 0)),
-                date = pDate.value,
-                n = +pPackages.value || 0,
-                price = +pCost.value || 0,
+            const pBahanEl = document.getElementById('pBahan');
+            const pDateEl = document.getElementById('pDate');
+            const pPackagesEl = document.getElementById('pPackages');
+            const pCostEl = document.getElementById('pCost');
+            const pNoteEl = document.getElementById('pNote');
+            const b = db.bahan.find(x => x.id === +(pBahanEl?.value || 0)),
+                date = pDateEl?.value || '',
+                n = +(pPackagesEl?.value || 0),
+                price = +(pCostEl?.value || 0),
                 r = getRange();
             if (!b) return toast('Pilih bahan');
             if (!date) return toast('Tanggal pembelian wajib diisi');
@@ -2367,7 +2380,7 @@
                 unit: b.unit,
                 cost: price,
                 total: n * price,
-                note: pNote.value.trim()
+                note: (pNoteEl?.value || '').trim()
             };
             // Pembelian menjadi sumber stok masuk dan riwayat pembelian.
             db.purchases.push({
