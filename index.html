@@ -218,7 +218,7 @@ function metrics(){
  rLaba.textContent=rupiah(totalO-totalH);rNet.textContent=rupiah(totalO-totalH-totalE);
 }
 function renderRecent(){let x=todayTx().slice(-6).reverse();recent.innerHTML=x.length?x.map(t=>`<div class="cart-item"><div><b>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</b><small style="display:block;color:var(--muted)">${t.time} · ${t.pay}</small></div><b>${rupiah(t.total)}</b></div>`).join(''):'<div class="empty">Belum ada transaksi hari ini.</div>'}
-function renderLow(){let x=db.bahan.filter(b=>b.stock<=b.min);lowStock.innerHTML=x.length?x.map(b=>`<div class="cart-item"><div><b>${b.name}</b><small style="display:block;color:var(--muted)">${formatQty(stockBaseQty(b))} ${b.unit} tersisa</small></div><span class="badge warn">Menipis</span></div>`).join(''):'<div class="empty">Semua stok aman ✓</div>'}
+function renderLow(){let x=db.bahan.filter(b=>stockBaseQty(b)<=((+b.min||0)));lowStock.innerHTML=x.length?x.map(b=>`<div class="cart-item"><div><b>${b.name}</b><small style="display:block;color:var(--muted)">${formatQty(stockBaseQty(b))} ${b.unit} tersisa · minimum ${formatQty(b.min)} ${b.unit}</small></div><span class="badge warn">Menipis</span></div>`).join(''):'<div class="empty">Semua stok aman ✓</div>'}
 
 function renderCats(){let cats=['Semua',...new Set(db.menus.map(m=>m.cat))];catsEl= document.getElementById('cats');catsEl.innerHTML=cats.map(c=>`<button class="cat ${c===activeCat?'active':''}" onclick="activeCat='${c}';renderProducts();renderCats()">${c}</button>`).join('')}
 function renderProducts(){let q=(document.getElementById('posSearch')?.value||'').toLowerCase();let a=db.menus.filter(m=>m.active&&(activeCat==='Semua'||m.cat===activeCat)&&m.name.toLowerCase().includes(q));products.innerHTML=a.map(m=>`<div class="product" role="button" tabindex="0" onclick="addCart(${m.id})" onkeydown="if(event.key==='Enter'||event.key===' ')addCart(${m.id})"><div class="emoji">${m.emoji||'☕'}</div><h3>${m.name}</h3><p>${m.cat}</p><div class="row"><span class="price">${rupiah(m.price)}</span><button class="mini" type="button" onclick="event.stopPropagation();addCart(${m.id})">Tambah</button></div></div>`).join('')||'<div class="empty" style="grid-column:1/-1">Menu tidak ditemukan.</div>'}
@@ -336,7 +336,7 @@ function renderBahan(){
   if(!el)return;
   el.innerHTML=db.bahan.map(b=>{
     const total=roundMoney((+b.stock||0)*(+b.cost||0));
-    const low=(+b.stock||0)<=(+b.min||0);
+    const low=stockBaseQty(b)<=((+b.min||0));
     return `<tr>
       <td><b>${b.name}</b></td>
       <td>${formatQty(b.content)}</td>
@@ -376,8 +376,8 @@ function openBahanModal(id=null){
       <div class="field"><label>SATUAN DASAR</label><select id="bUnit"><option value="gram" ${b.unit==='gram'?'selected':''}>gram</option><option value="ml" ${b.unit==='ml'?'selected':''}>ml</option><option value="pcs" ${b.unit==='pcs'?'selected':''}>pcs</option></select></div>
       <div class="field"><label>JUMLAH STOK</label><input id="bStock" type="number" min="0" step="any" value="${b.stock||0}"></div>
       <div class="field"><label>HARGA / PCS</label><input id="bCost" type="number" min="0" step="any" value="${b.cost||0}"></div>
-      <div class="field"><label>MINIMUM STOK</label><input id="bMin" type="number" min="0" step="any" value="${b.min||0}"></div>
-      <div class="field full"><div class="recipe-cost">Harga dasar: <b id="bBaseCost">${rupiah(baseCostOf(b))}/${b.unit||'pcs'}</b><div class="hint">Harga dasar = harga kemasan ÷ isi kemasan. Nilai ini digunakan otomatis saat menghitung HPP.</div></div></div>
+      <div class="field"><label>MINIMUM STOK (${b.unit||'satuan dasar'})</label><input id="bMin" type="number" min="0" step="any" value="${b.min||0}"></div>
+      <div class="field full"><div class="recipe-cost">Harga dasar: <b id="bBaseCost">${rupiah(baseCostOf(b))}/${b.unit||'pcs'}</b><div class="hint">Harga dasar = harga kemasan ÷ isi kemasan. Minimum stok diisi dalam satuan dasar (gram/ml/pcs), dan dibandingkan dengan stok aktual.</div></div></div>
     </div>
     <button class="btn primary" style="margin-top:1rem" onclick="saveBahan(${id||0})">Simpan Bahan</button>`);
   const refresh=()=>{const c=+(document.getElementById('bContent')?.value||0),p=+(document.getElementById('bCost')?.value||0),u=document.getElementById('bUnit')?.value||'pcs';const out=document.getElementById('bBaseCost');if(out)out.textContent=rupiah(c>0?p/c:0)+'/'+u};
