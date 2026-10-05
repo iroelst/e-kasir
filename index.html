@@ -192,7 +192,9 @@ let cart=[], pay='Tunai', activeCat='Semua';
 const rupiah=n=>new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n||0);
 const formatQty=n=>{const v=Math.round((+n||0)*100)/100;return new Intl.NumberFormat('id-ID',{maximumFractionDigits:2}).format(v)};
 const roundQty=n=>Math.round((+n||0)*1000000)/1000000;
+const roundMoney=n=>Math.round((+n||0)*100)/100;
 const stockBaseQty=b=>roundQty((+(b?.stock)||0)*(+(b?.content||1)));
+const stockPackageQtyFromBase=(b,baseQty)=>b&&+(b.content||0)>0?roundQty((+baseQty||0)/(+b.content||1)):0;
 const save=()=>localStorage.setItem(KEY,JSON.stringify(db));
 const today=()=>new Date().toISOString().slice(0,10);
 function openModal(title,body){document.getElementById('modalTitle').textContent=title;document.getElementById('modalBody').innerHTML=body;document.getElementById('modal').classList.add('show')}
@@ -228,56 +230,66 @@ document.querySelectorAll('.pay button').forEach(b=>b.onclick=()=>{pay=b.dataset
 function checkout(){
   if(!cart.length)return toast('Keranjang masih kosong');
 
-  // Hitung kebutuhan bahan berdasarkan resep SAAT transaksi dilakukan.
+  // SATUAN STOK TERPUSAT:
+  // - b.content = isi 1 kemasan (gram/ml/pcs)
+  // - b.stock   = jumlah kemasan yang tersedia
+  // - resep.qty = pemakaian satuan dasar per 1 porsi
+  // Kebutuhan stok dihitung dalam satuan dasar, lalu dikonversi kembali
+  // menjadi kemasan saat stok dikurangi.
   const stockNeed={};
   const itemSnapshots=[];
+
   for(const i of cart){
     const menu=db.menus.find(m=>m.id===i.id);
-    const rec=recipeForMenu(i.id).items||[];
     if(!menu)return toast('Menu tidak ditemukan');
+    const rec=recipeForMenu(i.id).items||[];
+    if(!rec.length)return toast(`Resep ${menu.name} belum tersedia`);
 
     const recipeSnapshot=rec.map(([name,qty])=>{
       const b=db.bahan.find(x=>x.name===name);
+      if(!b)throw new Error(`Bahan ${name} tidak ditemukan`);
+      const q=roundQty(qty);
+      const baseCost=baseCostOf(b);
       return {
         name,
-        qty:+qty||0,
-        unit:b?.unit||'',
-        // Snapshot biaya harus memakai harga dasar per satuan,
-        // bukan harga 1 kemasan.
-        costPerUnit:baseCostOf(b),
-        subtotal:baseCostOf(b)*(+qty||0)
+        qty:q,
+        unit:b.unit||'',
+        content:+(b.content||1),
+        packageCost:+(b.cost||0),
+        costPerUnit:baseCost,
+        subtotal:roundMoney(baseCost*q)
       };
     });
 
     recipeSnapshot.forEach(r=>{
-      stockNeed[r.name]=(stockNeed[r.name]||0)+(r.qty*i.qty);
+      stockNeed[r.name]=roundQty((stockNeed[r.name]||0)+(r.qty*(+i.qty||0)));
     });
 
-    const itemHpp=recipeSnapshot.reduce((s,r)=>s+r.subtotal,0);
-
-    // SNAPSHOT: semua data penting transaksi disalin sekarang.
+    const itemHpp=roundMoney(recipeSnapshot.reduce((s,r)=>s+r.subtotal,0));
     itemSnapshots.push({
       id:i.id,
       name:menu.name,
       cat:menu.cat,
-      qty:i.qty,
+      qty:+i.qty||0,
       price:+menu.price||0,
       hpp:itemHpp,
       recipe:recipeSnapshot
     });
   }
 
-  // Validasi stok sebelum menyimpan transaksi.
+  // Validasi seluruh kebutuhan stok sebelum transaksi disimpan.
   for(const name in stockNeed){
     const b=db.bahan.find(x=>x.name===name);
     if(!b)return toast(`Bahan ${name} tidak ditemukan`);
-    if(((+b.stock||0)*(+(b.content||1)))<stockNeed[name]){
-      return toast(`Stok ${name} tidak cukup`);
+    const availableBase=stockBaseQty(b);
+    const neededBase=stockNeed[name];
+    if(availableBase + 1e-9 < neededBase){
+      return toast(`Stok ${name} tidak cukup. Tersedia ${formatQty(availableBase)} ${b.unit}, perlu ${formatQty(neededBase)} ${b.unit}`);
     }
   }
 
-  const total=itemSnapshots.reduce((s,i)=>s+i.price*i.qty,0);
-  const hpp=itemSnapshots.reduce((s,i)=>s+i.hpp*i.qty,0);
+  const total=roundMoney(itemSnapshots.reduce((s,i)=>s+i.price*i.qty,0));
+  const hpp=roundMoney(itemSnapshots.reduce((s,i)=>s+i.hpp*i.qty,0));
   const d=new Date();
 
   db.transactions.push({
@@ -288,11 +300,10 @@ function checkout(){
     total,
     hpp,
     pay,
-    // Snapshot ringkas untuk menjaga histori tetap konsisten.
-    snapshotVersion:1
+    snapshotVersion:2
   });
 
-  // Kurangi stok berdasarkan snapshot resep transaksi.
+  // KURANGI STOK: kebutuhan dalam gram/ml/pcs dibagi isi per kemasan.
   for(const name in stockNeed){
     const b=db.bahan.find(x=>x.name===name);
     const content=+(b.content||1);
@@ -301,7 +312,7 @@ function checkout(){
   }
 
   save();
-  toast('Transaksi berhasil disimpan & histori HPP diamankan');
+  toast('Transaksi berhasil disimpan, HPP & stok diperbarui');
   cart=[];
   renderCart();
   renderAll();
@@ -324,13 +335,13 @@ function renderBahan(){
   const el=document.getElementById('bahanTable');
   if(!el)return;
   el.innerHTML=db.bahan.map(b=>{
-    const total=(+b.stock||0)*(+b.cost||0);
+    const total=roundMoney((+b.stock||0)*(+b.cost||0));
     const low=(+b.stock||0)<=(+b.min||0);
     return `<tr>
       <td><b>${b.name}</b></td>
       <td>${formatQty(b.content)}</td>
       <td>${b.unit}</td>
-      <td><b>${formatQty(b.stock)}</b></td>
+      <td><b>${formatQty(b.stock)}</b><small style="display:block;color:var(--bs-muted)">${formatQty(stockBaseQty(b))} ${b.unit}</small></td>
       <td>${rupiah(b.cost)}</td>
       <td>${rupiah(total)}</td>
       <td><span class="badge ${low?'warn':'ok'}">${low?'Menipis':'Aman'}</span></td>
@@ -537,62 +548,73 @@ function deleteExpense(i){if(confirm('Hapus pengeluaran ini?')){db.expenses.spli
 function saveSettings(){db.settings={name:shopName.value,phone:shopPhone.value,address:shopAddress.value};save();toast('Pengaturan tersimpan')}
 function backup(){let blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='backup-kopikasir-'+today()+'.json';a.click();URL.revokeObjectURL(a.href);toast('Backup dibuat')}
 function restore(file){if(!file)return;let r=new FileReader();r.onload=()=>{try{let x=JSON.parse(r.result);if(!x.menus||!x.transactions)throw 0;db=x;save();renderAll();toast('Data berhasil dipulihkan')}catch(e){toast('File backup tidak valid')}};r.readAsText(file)}
-function exportCSV(){let rows=[['Tanggal','Waktu','Item','Pembayaran','Omzet','HPP','Laba'],...db.transactions.map(t=>[t.date,t.time,t.items.map(i=>i.name+' x'+i.qty).join(' | '),t.pay,t.total,t.hpp,t.total-t.hpp])];let csv=rows.map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(',')).join('\n');let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='laporan-kopikasir.csv';a.click()}
+function exportCSV(){let rows=[['Tanggal','Waktu','Item','Pembayaran','Omzet','HPP','Laba'],...db.transactions.map(t=>[t.date,t.time,t.items.map(i=>i.name+' x'+i.qty).join(' | '),t.pay,t.total,getTransactionHpp(t),t.total-getTransactionHpp(t)])];let csv=rows.map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(',')).join('\n');let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='laporan-kopikasir.csv';a.click()}
 function calculateSnapshotHpp(t){
-  // Prioritas utama: snapshot resep yang tersimpan di transaksi.
   if(Array.isArray(t.items)){
     let total=0,hasSnapshot=false;
     for(const item of t.items){
-      if(Array.isArray(item.recipe) && item.recipe.length){
+      if(Array.isArray(item.recipe)&&item.recipe.length){
         hasSnapshot=true;
         const itemHpp=item.recipe.reduce((sum,r)=>{
-          const q=+(r.qty||0);
-          // Transaksi lama mungkin menyimpan subtotal yang salah (harga kemasan
-          // dikalikan pemakaian). Hitung dari costPerUnit bila tersedia.
-          const cpu=+(r.costPerUnit||0);
-          return sum + (cpu*q);
+          return sum + (+(r.costPerUnit||0))*(+(r.qty||0));
         },0);
         total += itemHpp*(+(item.qty||0));
       }
     }
-    if(hasSnapshot)return total;
+    if(hasSnapshot)return roundMoney(total);
   }
 
-  // Untuk transaksi lama yang belum memiliki recipe snapshot, gunakan HPP
-  // menu saat migrasi/perbaikan satu kali. Setelah diperbaiki, nilainya disimpan.
   if(Array.isArray(t.items)){
-    return t.items.reduce((sum,item)=>{
+    return roundMoney(t.items.reduce((sum,item)=>{
       const menu=db.menus.find(m=>m.id===item.id);
-      const hpp=menu ? calcRecipeCost(recipeForMenu(menu.id).items||[]) : +(item.hpp||0);
+      const hpp=menu?calcRecipeCost(recipeForMenu(menu.id).items||[]):+(item.hpp||0);
       return sum + hpp*(+(item.qty||0));
-    },0);
+    },0));
   }
-  return +(t.hpp||0);
+  return roundMoney(+(t.hpp||0));
 }
 
 function repairTransactionSnapshots(){
   if(!Array.isArray(db.transactions))return false;
   let changed=false;
+
   db.transactions.forEach(t=>{
-    const current=+(t.hpp||0);
-    // Transaksi yang jelas rusak: HPP melebihi omzet. Ini memperbaiki data
-    // lama dari versi sebelum snapshot HPP per satuan diterapkan.
-    if(current>+(t.total||0) || current<0){
+    if(!Array.isArray(t.items)||!t.items.length)return;
+
+    // Jika transaksi sudah memiliki recipe snapshot, selalu gunakan snapshot itu.
+    // Ini menjaga histori tetap independen dari perubahan harga/resep saat ini.
+    const hasRecipeSnapshot=t.items.some(item=>Array.isArray(item.recipe)&&item.recipe.length);
+    if(hasRecipeSnapshot){
       const fixed=calculateSnapshotHpp(t);
-      if(Number.isFinite(fixed) && fixed>=0){
-        t.hpp=fixed;
-        t.snapshotVersion=2;
-        if(Array.isArray(t.items)){
-          t.items=t.items.map(item=>{
-            const menu=db.menus.find(m=>m.id===item.id);
-            const hppPerUnit=menu ? calcRecipeCost(recipeForMenu(menu.id).items||[]) : +(item.hpp||0);
-            return {...item,hpp:hppPerUnit};
-          });
-        }
+      if(Number.isFinite(fixed) && fixed>=0 && Math.abs((+t.hpp||0)-fixed)>0.005){
+        t.hpp=roundMoney(fixed);
         changed=true;
       }
+      t.items=t.items.map(item=>{
+        if(!Array.isArray(item.recipe)||!item.recipe.length)return item;
+        const unitHpp=roundMoney(item.recipe.reduce((sum,r)=>sum+(+(r.costPerUnit||0))*(+(r.qty||0)),0));
+        if((+item.hpp||0)!==unitHpp){changed=true;return {...item,hpp:unitHpp};}
+        return item;
+      });
+      if(t.snapshotVersion!==2){t.snapshotVersion=2;changed=true;}
+      return;
+    }
+
+    // Transaksi lama tanpa snapshot: migrasi terbaik berdasarkan resep yang
+    // tersedia saat ini. Setelah migrasi, nilai tersebut menjadi histori tetap.
+    const fixed=calculateSnapshotHpp(t);
+    if(Number.isFinite(fixed) && fixed>=0){
+      if(Math.abs((+t.hpp||0)-fixed)>0.005){t.hpp=roundMoney(fixed);changed=true;}
+      t.items=t.items.map(item=>{
+        const menu=db.menus.find(m=>m.id===item.id);
+        const unitHpp=menu?roundMoney(calcRecipeCost(recipeForMenu(menu.id).items||[])):+(item.hpp||0);
+        return {...item,hpp:unitHpp};
+      });
+      t.snapshotVersion=2;
+      changed=true;
     }
   });
+
   if(changed)save();
   return changed;
 }
