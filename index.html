@@ -185,6 +185,9 @@ db.bahan.forEach(b=>{
 });
 const MENU_CATS=['Minuman','Makanan','Snack'];
 
+// Perbaiki transaksi lama yang memiliki HPP tidak masuk akal (mis. HPP > omzet).
+repairTransactionSnapshots();
+
 let cart=[], pay='Tunai', activeCat='Semua';
 const rupiah=n=>new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n||0);
 const save=()=>localStorage.setItem(KEY,JSON.stringify(db));
@@ -236,8 +239,10 @@ function checkout(){
         name,
         qty:+qty||0,
         unit:b?.unit||'',
-        costPerUnit:+(b?.cost||0),
-        subtotal:(+(b?.cost||0))*(+qty||0)
+        // Snapshot biaya harus memakai harga dasar per satuan,
+        // bukan harga 1 kemasan.
+        costPerUnit:baseCostOf(b),
+        subtotal:baseCostOf(b)*(+qty||0)
       };
     });
 
@@ -530,9 +535,66 @@ function saveSettings(){db.settings={name:shopName.value,phone:shopPhone.value,a
 function backup(){let blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='backup-kopikasir-'+today()+'.json';a.click();URL.revokeObjectURL(a.href);toast('Backup dibuat')}
 function restore(file){if(!file)return;let r=new FileReader();r.onload=()=>{try{let x=JSON.parse(r.result);if(!x.menus||!x.transactions)throw 0;db=x;save();renderAll();toast('Data berhasil dipulihkan')}catch(e){toast('File backup tidak valid')}};r.readAsText(file)}
 function exportCSV(){let rows=[['Tanggal','Waktu','Item','Pembayaran','Omzet','HPP','Laba'],...db.transactions.map(t=>[t.date,t.time,t.items.map(i=>i.name+' x'+i.qty).join(' | '),t.pay,t.total,t.hpp,t.total-t.hpp])];let csv=rows.map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(',')).join('\n');let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='laporan-kopikasir.csv';a.click()}
+function calculateSnapshotHpp(t){
+  // Prioritas utama: snapshot resep yang tersimpan di transaksi.
+  if(Array.isArray(t.items)){
+    let total=0,hasSnapshot=false;
+    for(const item of t.items){
+      if(Array.isArray(item.recipe) && item.recipe.length){
+        hasSnapshot=true;
+        const itemHpp=item.recipe.reduce((sum,r)=>{
+          const q=+(r.qty||0);
+          // Transaksi lama mungkin menyimpan subtotal yang salah (harga kemasan
+          // dikalikan pemakaian). Hitung dari costPerUnit bila tersedia.
+          const cpu=+(r.costPerUnit||0);
+          return sum + (cpu*q);
+        },0);
+        total += itemHpp*(+(item.qty||0));
+      }
+    }
+    if(hasSnapshot)return total;
+  }
+
+  // Untuk transaksi lama yang belum memiliki recipe snapshot, gunakan HPP
+  // menu saat migrasi/perbaikan satu kali. Setelah diperbaiki, nilainya disimpan.
+  if(Array.isArray(t.items)){
+    return t.items.reduce((sum,item)=>{
+      const menu=db.menus.find(m=>m.id===item.id);
+      const hpp=menu ? calcRecipeCost(recipeForMenu(menu.id).items||[]) : +(item.hpp||0);
+      return sum + hpp*(+(item.qty||0));
+    },0);
+  }
+  return +(t.hpp||0);
+}
+
+function repairTransactionSnapshots(){
+  if(!Array.isArray(db.transactions))return false;
+  let changed=false;
+  db.transactions.forEach(t=>{
+    const current=+(t.hpp||0);
+    // Transaksi yang jelas rusak: HPP melebihi omzet. Ini memperbaiki data
+    // lama dari versi sebelum snapshot HPP per satuan diterapkan.
+    if(current>+(t.total||0) || current<0){
+      const fixed=calculateSnapshotHpp(t);
+      if(Number.isFinite(fixed) && fixed>=0){
+        t.hpp=fixed;
+        t.snapshotVersion=2;
+        if(Array.isArray(t.items)){
+          t.items=t.items.map(item=>{
+            const menu=db.menus.find(m=>m.id===item.id);
+            const hppPerUnit=menu ? calcRecipeCost(recipeForMenu(menu.id).items||[]) : +(item.hpp||0);
+            return {...item,hpp:hppPerUnit};
+          });
+        }
+        changed=true;
+      }
+    }
+  });
+  if(changed)save();
+  return changed;
+}
+
 function getTransactionHpp(t){
-  // Transaksi lama memakai snapshot HPP yang tersimpan.
-  // Tidak pernah mengambil ulang harga bahan saat ini.
   return +(t.hpp||0);
 }
 function transactionSnapshotText(t){
