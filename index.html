@@ -300,17 +300,33 @@ function openBahanForPurchase(){
  openBahanModal();
 }
 function openPurchaseModal(){
+ const r=getRange();
  if(!db.bahan.length)return openModal('Pembelian Bahan',`<div class="empty">Belum ada bahan yang terdaftar.<div style="margin-top:12px"><button class="btn primary" onclick="openBahanForPurchase()">＋ Tambah Bahan Baru</button></div></div>`);
  const selectedId=pendingPurchaseBahanId;
  const opts=db.bahan.map(b=>`<option value="${b.id}" ${selectedId===b.id?'selected':''}>${b.name} — ${formatQty(b.content)} ${b.unit}/kemasan — ${rupiah(b.cost)}</option>`).join('');
- openModal('Pembelian Bahan',`<div class="form-grid"><div class="field full"><label>BAHAN</label><select id="pBahan" onchange="updatePurchasePreview()">${opts}</select><button type="button" class="btn" style="margin-top:8px" onclick="openBahanForPurchase()">＋ Tambah Bahan Baru</button></div><div class="field"><label>TANGGAL PEMBELIAN</label><input id="pDate" type="date" value="${today()}"></div><div class="field"><label>JUMLAH KEMASAN</label><input id="pPackages" type="number" step="1" min="1" value="1" oninput="updatePurchasePreview()"></div><div class="field"><label>HARGA / KEMASAN</label><input id="pCost" type="number" min="0" oninput="updatePurchasePreview()"></div><div class="field"><label>ISI MASUK</label><input id="pQty" readonly></div><div class="field full"><label>KETERANGAN</label><input id="pNote" placeholder="Contoh: pembelian stok"></div></div><div id="purchasePreview" style="margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:var(--muted)"></div><button class="btn primary" style="margin-top:15px" onclick="savePurchase()">Simpan Pembelian</button>`);
+ const defaultDate=(today()>=r.from&&today()<=r.to)?today():r.from;
+ openModal('Pembelian Bahan',`<div class="form-grid"><div class="field full"><label>BAHAN</label><select id="pBahan" onchange="updatePurchasePreview()">${opts}</select><button type="button" class="btn" style="margin-top:8px" onclick="openBahanForPurchase()">＋ Tambah Bahan Baru</button></div><div class="field"><label>TANGGAL PEMBELIAN</label><input id="pDate" type="date" value="${defaultDate}" min="${r.from}" max="${r.to}"></div><div class="field"><label>JUMLAH KEMASAN</label><input id="pPackages" type="number" step="1" min="1" value="1" oninput="updatePurchasePreview()"></div><div class="field"><label>HARGA / KEMASAN</label><input id="pCost" type="number" min="0" oninput="updatePurchasePreview()"></div><div class="field"><label>ISI MASUK</label><input id="pQty" readonly></div><div class="field full"><label>KETERANGAN</label><input id="pNote" placeholder="Contoh: pembelian stok"></div></div><div id="purchasePreview" style="margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:var(--muted)"></div><button class="btn primary" style="margin-top:15px" onclick="savePurchase()">Simpan Pembelian</button>`);
  const b=db.bahan.find(x=>x.id===selectedId)||db.bahan[0];
  if(pendingPurchaseBahanId!==null)pendingPurchaseBahanId=null;
  pCost.value=b.cost;
  updatePurchasePreview();
 }
 function updatePurchasePreview(){const b=db.bahan.find(x=>x.id===+(document.getElementById('pBahan')?.value||0));if(!b)return;const pkg=document.getElementById('pPackages');if(pkg){pkg.step=b.unit==='pcs'?'1':'0.01';pkg.min=b.unit==='pcs'?'1':'0.01';}const n=+(pkg?.value||0),price=+(document.getElementById('pCost')?.value||0),qty=n*b.content;document.getElementById('pQty').value=formatQty(qty)+' '+b.unit;document.getElementById('purchasePreview').textContent=`Total pembelian: ${rupiah(n*price)} · Stok bertambah ${formatQty(qty)} ${b.unit}`;}
-function savePurchase(){const b=db.bahan.find(x=>x.id===+(pBahan.value||0)),date=pDate.value,n=+pPackages.value||0,price=+pCost.value||0;if(!b)return toast('Pilih bahan');if(!date)return toast('Tanggal pembelian wajib diisi');if(n<=0)return toast('Jumlah kemasan harus lebih dari 0');if(b.unit==='pcs'&&!Number.isInteger(n))return toast('Jumlah kemasan untuk bahan pcs harus bilangan bulat');if(price<0)return toast('Harga kemasan tidak valid');db.stockMoves.push({id:db.nextId++,type:'purchase',date,bahanId:b.id,bahanName:b.name,packages:n,qty:n*b.content,unit:b.unit,cost:price,total:n*price,note:pNote.value.trim()});save();closeModal();renderAll();toast('Pembelian tersimpan')}
+function savePurchase(){
+ const b=db.bahan.find(x=>x.id===+(pBahan.value||0)),date=pDate.value,n=+pPackages.value||0,price=+pCost.value||0,r=getRange();
+ if(!b)return toast('Pilih bahan');
+ if(!date)return toast('Tanggal pembelian wajib diisi');
+ if(date<r.from||date>r.to)return toast('Tanggal pembelian harus berada dalam periode yang sedang ditampilkan');
+ if(n<=0)return toast('Jumlah kemasan harus lebih dari 0');
+ if(b.unit==='pcs'&&!Number.isInteger(n))return toast('Jumlah kemasan untuk bahan pcs harus bilangan bulat');
+ if(price<0)return toast('Harga kemasan tidak valid');
+ const qty=n*b.content;
+ db.stockMoves.push({id:db.nextId++,type:'purchase',date,bahanId:b.id,bahanName:b.name,packages:n,qty,unit:b.unit,cost:price,total:n*price,note:pNote.value.trim()});
+ // Pembelian adalah stok masuk. Tidak perlu dimasukkan lagi sebagai stok awal.
+ const p=ensurePeriod(rangeKey(r.from,r.to),r.from,r.to);
+ p.ending[b.id]=+(p.opening[b.id]??0)+rangePurchases(r.from,r.to).filter(x=>x.bahanId===b.id).reduce((a,x)=>a+(+x.qty||0),0)-usageForRange(b,r.from,r.to);
+ save();closeModal();renderAll();toast(`Pembelian tersimpan · stok bertambah ${formatQty(qty)} ${b.unit}`)
+}
 function openExpenseModal(){openModal('Catat Pengeluaran',`<div class="form-grid"><div class="field"><label>KATEGORI</label><input id="eCat" value="Operasional"></div><div class="field"><label>JUMLAH</label><input id="eAmount" type="number"></div><div class="field full"><label>KETERANGAN</label><input id="eNote" placeholder="Contoh: beli gas"></div></div><button class="btn primary" style="margin-top:15px" onclick="saveExpense()">Simpan</button>`)}
 function saveExpense(){if(!+eAmount.value)return toast('Masukkan jumlah');db.expenses.push({date:today(),cat:eCat.value,note:eNote.value,amount:+eAmount.value});save();closeModal();renderAll();toast('Pengeluaran tersimpan')}
 function deleteExpense(i){if(confirm('Hapus pengeluaran ini?')){db.expenses.splice(i,1);save();renderAll()}}
