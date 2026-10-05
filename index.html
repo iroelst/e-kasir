@@ -314,36 +314,56 @@ function setCloudStatus(text,type=''){
   el.textContent=text;el.className='cloud-dot '+type;
 }
 function userId(){return currentUser?.uid||fbAuth?.currentUser?.uid||''}
-function localHasData(){
-  return !!(db.menus?.length||db.bahan?.length||db.recipes?.length||db.transactions?.length||db.expenses?.length||db.purchases?.length||Object.keys(db.stockPeriods||{}).length);
-}
+const SHOP_ID='utama';
+function shopId(){return SHOP_ID}
+function shopRef(){return fbDb.collection('toko').doc(shopId())}
+function localHasData(){return !!(db.menus?.length||db.bahan?.length||db.recipes?.length||db.transactions?.length||db.expenses?.length||db.purchases?.length||Object.keys(db.stockPeriods||{}).length)}
 function scheduleCloudSync(){
   if(cloudApplying||!userId())return;
   if(!firebaseReady){setCloudStatus('☁️ Firebase belum terhubung');return}
-  clearTimeout(cloudSyncTimer);
-  setCloudStatus('☁️ Menunggu sinkronisasi','sync');
-  cloudSyncTimer=setTimeout(()=>syncCloud(false),800);
+  clearTimeout(cloudSyncTimer);setCloudStatus('☁️ Menunggu sinkronisasi','sync');cloudSyncTimer=setTimeout(()=>syncCloud(false),800);
 }
-async function pullCloud(){
+const cloudCollections=['menus','bahan','recipes','transactions','purchases','expenses'];
+async function readCloudData(){
   ensureFirebase();
-  const uid=userId();if(!uid)throw new Error('Sesi Firebase belum siap.');
-  const snap=await fbDb.collection('ekasir_data').doc(uid).get();
-  if(!snap.exists)return null;
-  const x=snap.data()||{};
-  return {data:x.data||blankDb(),updated_at:x.updatedAtMs||0};
+  const ref=shopRef();
+  const out=blankDb();
+  for(const name of cloudCollections){
+    const snap=await ref.collection(name).get();
+    out[name]=snap.docs.map(d=>d.data());
+  }
+  const periods=await ref.collection('stockPeriods').get();
+  out.stockPeriods={};periods.forEach(d=>{out.stockPeriods[d.id]=d.data()});
+  const settingSnap=await ref.collection('settings').doc('main').get();
+  if(settingSnap.exists)out.settings={...out.settings,...(settingSnap.data()||{})};
+  out.nextId=Math.max(1,...cloudCollections.flatMap(n=>out[n].map(x=>Number(x?.id)||0)))+1;
+  normalizeDb();
+  return out;
+}
+async function writeCollection(name,items){
+  const ref=shopRef().collection(name);
+  const old=await ref.get();
+  const chunks=[];
+  let batch=fbDb.batch(),count=0;
+  old.docs.forEach(d=>{batch.delete(d.ref);if(++count>=450){chunks.push(batch);batch=fbDb.batch();count=0}});
+  items.forEach(item=>{const id=String(item.id);batch.set(ref.doc(id),item);if(++count>=450){chunks.push(batch);batch=fbDb.batch();count=0}});
+  if(count)chunks.push(batch);
+  for(const b of chunks)await b.commit();
 }
 async function pushCloud(){
   ensureFirebase();
   const uid=userId();if(!uid)throw new Error('Sesi Firebase belum siap.');
-  const now=Date.now();
-  await fbDb.collection('ekasir_data').doc(uid).set({
-    userId:uid,
-    data:db,
-    updatedAtMs:now,
-    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
-  },{merge:true});
-  localStorage.setItem(KEY+'_cloud_updated_at',String(now));
-  return now;
+  // Data master/transaksi milik toko. Struktur ini mengikuti Firestore Rules yang sudah dibuat.
+  for(const name of cloudCollections)await writeCollection(name,db[name]||[]);
+  await writeCollection('stockPeriods',Object.entries(db.stockPeriods||{}).map(([id,v])=>({id,...v})));
+  // Pengaturan toko hanya ditulis oleh Admin sesuai Rules.
+  const isAdminNow=currentUser?.uid==='XgaiCBqUcYg9Zp5DLMTtjeRkC8B2' || currentUser?.role==='admin';
+  if(isAdminNow){await shopRef().collection('settings').doc('main').set(db.settings||{}, {merge:true});}
+  const now=Date.now();localStorage.setItem(KEY+'_cloud_updated_at',String(now));return now;
+}
+async function pullCloud(){
+  const data=await readCloudData();
+  return {data,updated_at:Number(localStorage.getItem(KEY+'_cloud_updated_at')||0)};
 }
 async function syncCloud(force=false){
   if(cloudBusy)return;
@@ -352,28 +372,29 @@ async function syncCloud(force=false){
   cloudBusy=true;setCloudStatus('☁️ Menyinkronkan...','sync');
   try{
     const remote=await pullCloud();
-    if(!remote){await pushCloud();setCloudStatus('☁️ Tersinkron','ok');return}
-    const remoteStamp=Number(remote.updated_at||0);
-    const localStamp=Number(localStorage.getItem(KEY+'_cloud_updated_at')||0);
+    const remoteHas=localHasData()||remote.data.menus.length||remote.data.bahan.length||remote.data.transactions.length||remote.data.purchases.length||remote.data.expenses.length||Object.keys(remote.data.stockPeriods||{}).length;
+    if(!remoteHas){await pushCloud();setCloudStatus('☁️ Tersinkron','ok');return}
+    if(!localHasData()){
+      cloudApplying=true;db=remote.data;normalizeDb();saveLocalOnly();renderAll();cloudApplying=false;setCloudStatus('☁️ Tersinkron','ok');return;
+    }
     if(force){
-      const useCloud=confirm('Data Firebase ditemukan.\n\nOK = gunakan data Firebase di perangkat ini.\nBatal = pertahankan data perangkat ini dan kirim ke Firebase.');
-      if(useCloud){cloudApplying=true;db=remote.data||blankDb();normalizeDb();saveLocalOnly();renderAll();cloudApplying=false;localStorage.setItem(KEY+'_cloud_updated_at',String(remoteStamp||Date.now()));}
+      const useCloud=confirm('Data Firebase ditemukan.\n\nOK = gunakan data Firebase.\nBatal = pertahankan data perangkat dan kirim ke Firebase.');
+      if(useCloud){cloudApplying=true;db=remote.data;normalizeDb();saveLocalOnly();renderAll();cloudApplying=false;}
       else await pushCloud();
-    }else if(!localHasData()){
-      cloudApplying=true;db=remote.data||blankDb();normalizeDb();saveLocalOnly();renderAll();cloudApplying=false;localStorage.setItem(KEY+'_cloud_updated_at',String(remoteStamp||Date.now()));
-    }else if(localStamp && remoteStamp<=localStamp){
-      // Data perangkat sudah diketahui sama/lebih baru.
-      if(remoteStamp<localStamp)await pushCloud();
     }else{
-      const useCloud=confirm('Data Firebase lebih baru tersedia.\n\nOK = ambil data Firebase.\nBatal = pertahankan data perangkat ini dan kirim ke Firebase.');
-      if(useCloud){cloudApplying=true;db=remote.data||blankDb();normalizeDb();saveLocalOnly();cloudApplying=false;localStorage.setItem(KEY+'_cloud_updated_at',String(remoteStamp||Date.now()));renderAll();}
-      else await pushCloud();
+      // Untuk mencegah data tertimpa diam-diam, jika perangkat sudah memiliki data,
+      // pengguna menentukan sumber data saat sinkronisasi pertama.
+      const stamp=Number(localStorage.getItem(KEY+'_cloud_updated_at')||0);
+      if(stamp===0){
+        const useCloud=confirm('Data lokal dan Firebase sama-sama memiliki data.\n\nOK = gunakan Firebase.\nBatal = gunakan data perangkat ini.');
+        if(useCloud){cloudApplying=true;db=remote.data;normalizeDb();saveLocalOnly();renderAll();cloudApplying=false;}
+        else await pushCloud();
+      }
     }
     setCloudStatus('☁️ Tersinkron','ok');
   }catch(e){
-    console.error('Firebase sync:',e);
-    setCloudStatus('☁️ Sinkron gagal','err');
-    if(force)toast('Sinkronisasi gagal: '+(e.message||'periksa Firestore Rules'));
+    console.error('Firebase Firestore:',e);setCloudStatus('☁️ Sinkron gagal','err');
+    if(force)toast('Sinkronisasi gagal: '+(e.message||'periksa Firestore Rules dan struktur toko'));
   }finally{cloudBusy=false}
 }
 function saveLocalOnly(){localStorage.setItem(KEY,JSON.stringify(db));}
@@ -424,13 +445,13 @@ async function submitAuth(ev){
 }
 async function finishLogin(username,user){
   if(!user?.uid)throw new Error('Akun Firebase tidak valid.');
-  currentUser={username,uid:user.uid,email:user.email||usernameEmail(username)};
+  let profile={};
+  try{const snap=await fbDb.collection('users').doc(user.uid).get();if(snap.exists)profile=snap.data()||{}}catch(e){}
+  currentUser={username,uid:user.uid,email:user.email||usernameEmail(username),role:profile.role||'',tokoId:profile.tokoId||SHOP_ID};
   localStorage.setItem(AUTH_KEY,JSON.stringify(currentUser));
   KEY=BASE_KEY+'_'+username;
-  db=JSON.parse(localStorage.getItem(KEY)||'null')||blankDb();
-  normalizeDb();
-  document.getElementById('authScreen').style.display='none';
-  renderUserChip();loadFirebaseConfigToForm();renderAll();
+  db=JSON.parse(localStorage.getItem(KEY)||'null')||blankDb();normalizeDb();
+  document.getElementById('authScreen').style.display='none';renderUserChip();loadFirebaseConfigToForm();renderAll();
   setTimeout(()=>syncCloud(false),150);
 }
 function normalizeDb(){
@@ -467,6 +488,7 @@ async function restoreSession(){
   try{
     currentUser=JSON.parse(s);
     if(!currentUser?.username||!currentUser?.uid)throw 0;
+    if(firebaseReady&&fbAuth.currentUser){try{const ps=await fbDb.collection('users').doc(currentUser.uid).get();if(ps.exists){const p=ps.data()||{};currentUser.role=p.role||currentUser.role||'';currentUser.tokoId=p.tokoId||currentUser.tokoId||SHOP_ID;}}catch(e){}}
     KEY=BASE_KEY+'_'+currentUser.username;
     db=JSON.parse(localStorage.getItem(KEY)||'null')||blankDb();
     normalizeDb();document.getElementById('authScreen').style.display='none';renderUserChip();renderAll();
