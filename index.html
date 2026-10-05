@@ -7,35 +7,49 @@
 <title>KopiKasir — Warung Kopi</title>
 <style>
 :root{
-  --bg:#f4f6f8;--surface:#fff;--surface2:#f8fafc;--text:#172033;--muted:#6b7280;
-  --line:#e5e7eb;--primary:#8b5e34;--primary2:#6f4726;--success:#15803d;--danger:#dc2626;
-  --shadow:0 10px 30px rgba(17,24,39,.07);--radius:18px;
+  --bs-primary:#6f4e37;--bs-primary-rgb:111,78,55;
+  --bs-success:#198754;--bs-danger:#dc3545;--bs-warning:#ffc107;
+  --bs-bg:#f5f7fb;--bs-card:#fff;--bs-border:#e7eaf0;
+  --bs-text:#212529;--bs-muted:#6c757d;--bs-dark:#212529;
+  --shadow:0 .35rem 1rem rgba(33,37,41,.06);--radius:.75rem
 }
-*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-button,input,select{font:inherit} button{cursor:pointer;border:0}
-.app{min-height:100vh;display:flex}.sidebar{width:250px;background:#111827;color:#fff;padding:22px 14px;position:fixed;inset:0 auto 0 0;z-index:10}
-.brand{display:flex;gap:12px;align-items:center;padding:6px 10px 24px}.brand-icon{width:42px;height:42px;border-radius:13px;background:#a66a37;display:grid;place-items:center;font-size:22px}
-.brand b{display:block;font-size:18px}.brand small{color:#aeb7c7}.nav{display:grid;gap:6px}.nav button{background:transparent;color:#b9c1cf;text-align:left;padding:12px 13px;border-radius:12px;display:flex;gap:12px;align-items:center}.nav button:hover,.nav button.active{background:#2a3343;color:#fff}.nav span:first-child{width:22px;text-align:center}
-.main{margin-left:250px;width:calc(100% - 250px);padding:26px;max-width:1500px}.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}.topbar h1{margin:0;font-size:25px}.topbar p{margin:5px 0 0;color:var(--muted);font-size:14px}
-.actions{display:flex;gap:10px}.btn{padding:11px 15px;border-radius:12px;background:var(--surface);border:1px solid var(--line);box-shadow:0 3px 10px rgba(0,0,0,.03)}.btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}.btn.danger{color:#fff;background:var(--danger)}
-.page{display:none}.page.active{display:block}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:15px}.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow)}.metric{display:flex;justify-content:space-between;gap:12px}.metric .icon{width:42px;height:42px;border-radius:12px;background:#f1e6da;display:grid;place-items:center}.metric small{color:var(--muted)}.metric strong{font-size:23px;display:block;margin-top:7px}.trend{font-size:12px;color:var(--success);margin-top:8px}
-.grid2{display:grid;grid-template-columns:1.25fr .75fr;gap:18px;margin-top:18px}.section-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}.section-title h2{font-size:17px;margin:0}.table{width:100%;border-collapse:collapse}.table th,.table td{padding:12px 9px;border-bottom:1px solid var(--line);text-align:left;font-size:13px}.table th{color:var(--muted);font-weight:600}.money{font-variant-numeric:tabular-nums}.badge{display:inline-flex;padding:5px 9px;border-radius:99px;font-size:11px;font-weight:700;background:#eef2f7}.badge.ok{background:#dcfce7;color:#166534}.badge.warn{background:#fef3c7;color:#92400e}
-.toolbar{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}.search{flex:1;min-width:220px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:#fff;outline:none}.search:focus,input:focus,select:focus{border-color:#b98252;box-shadow:0 0 0 3px rgba(166,106,55,.12)}
-.product-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.product{background:#fff;border:1px solid var(--line);border-radius:16px;padding:15px;transition:.15s}.product:hover{transform:translateY(-2px);box-shadow:var(--shadow)}.product .emoji{font-size:30px;width:52px;height:52px;border-radius:14px;background:#f6eee7;display:grid;place-items:center;margin-bottom:12px}.product h3{font-size:15px;margin:0 0 5px}.product p{font-size:12px;color:var(--muted);margin:0 0 12px}.price{font-weight:800}.product .row{display:flex;justify-content:space-between;align-items:center}.mini{padding:7px 10px;border-radius:9px;background:#f1e6da;color:#6f4726;font-weight:700}
-.pos{display:grid;grid-template-columns:1.4fr .7fr;gap:18px}.categories{display:flex;gap:8px;overflow:auto;margin-bottom:13px}.cat{white-space:nowrap;padding:9px 13px;border-radius:10px;background:#fff;border:1px solid var(--line)}.cat.active{background:var(--primary);color:#fff}.cart{position:sticky;top:20px;height:max-content}.cart-item{display:flex;justify-content:space-between;gap:10px;padding:11px 0;border-bottom:1px solid var(--line)}.qty{display:flex;align-items:center;gap:7px}.qty button{width:27px;height:27px;border-radius:8px;background:#f1f3f5}.summary{margin-top:15px;display:grid;gap:9px}.summary div{display:flex;justify-content:space-between}.summary .total{font-size:20px;font-weight:800;border-top:1px solid var(--line);padding-top:12px}.pay{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.pay button{padding:10px;border-radius:10px;background:#f3f4f6}.pay button.active{background:#111827;color:#fff}.empty{text-align:center;color:var(--muted);padding:30px 10px}
-.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:13px}.field{display:grid;gap:6px}.field label{font-size:12px;color:var(--muted);font-weight:600}.field input,.field select{padding:11px 12px;border:1px solid var(--line);border-radius:11px;outline:none;background:#fff}.full{grid-column:1/-1}
-.modal{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;place-items:center;z-index:30;padding:20px}.modal.show{display:grid}.modal-box{background:#fff;border-radius:20px;padding:22px;width:min(600px,100%);box-shadow:0 25px 70px rgba(0,0,0,.2)}.modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.modal-head h2{margin:0;font-size:19px}.close{background:#f3f4f6;border-radius:9px;padding:7px 10px}
-.toast{position:fixed;right:20px;bottom:20px;background:#111827;color:#fff;padding:12px 15px;border-radius:12px;display:none;z-index:50}.toast.show{display:block}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--bs-bg);color:var(--bs-text);font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+button,input,select{font:inherit}
+button{cursor:pointer}
+.app{min-height:100vh;display:flex}
+.sidebar{width:250px;background:#212529;color:#fff;padding:1rem .75rem;position:fixed;inset:0 auto 0 0;z-index:20;box-shadow:.2rem 0 .8rem rgba(0,0,0,.08)}
+.brand{display:flex;gap:.75rem;align-items:center;padding:.5rem .65rem 1.25rem;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:.75rem}
+.brand-icon{width:42px;height:42px;border-radius:.7rem;background:var(--bs-primary);display:grid;place-items:center;font-size:21px}
+.brand b{display:block;font-size:1rem}.brand small{color:#adb5bd}
+.nav{display:grid;gap:.25rem}.nav button{width:100%;background:transparent;color:#adb5bd;text-align:left;padding:.7rem .8rem;border:0;border-radius:.55rem;display:flex;gap:.7rem;align-items:center;transition:.15s}
+.nav button:hover,.nav button.active{background:#343a40;color:#fff}.nav span:first-child{width:22px;text-align:center}
+.main{margin-left:250px;width:calc(100% - 250px);padding:1.5rem;max-width:1600px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem}
+.topbar h1{margin:0;font-size:1.45rem;font-weight:650}.topbar p{margin:.25rem 0 0;color:var(--bs-muted);font-size:.875rem}
+.actions{display:flex;gap:.5rem;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.35rem;padding:.55rem .85rem;border:1px solid #dee2e6;border-radius:.5rem;background:#fff;color:#343a40;box-shadow:none;transition:.15s;font-size:.875rem}
+.btn:hover{background:#f8f9fa;border-color:#ced4da}.btn.primary{background:var(--bs-primary);color:#fff;border-color:var(--bs-primary)}.btn.primary:hover{filter:brightness(.94)}
+.btn.danger{background:var(--bs-danger);color:#fff;border-color:var(--bs-danger)}
+.page{display:none}.page.active{display:block}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem}
+.card{background:var(--bs-card);border:1px solid var(--bs-border);border-radius:var(--radius);padding:1rem;box-shadow:var(--shadow)}
+.metric{display:flex;justify-content:space-between;gap:.75rem}.metric small{color:var(--bs-muted);font-size:.78rem}.metric strong{font-size:1.35rem;display:block;margin-top:.35rem}.metric .icon{width:42px;height:42px;border-radius:.65rem;background:#f1ece8;display:grid;place-items:center}.trend{font-size:.72rem;color:var(--bs-success);margin-top:.4rem}
+.grid2{display:grid;grid-template-columns:1.25fr .75fr;gap:1rem;margin-top:1rem}.section-title{display:flex;justify-content:space-between;align-items:center;gap:.75rem;margin-bottom:.9rem}.section-title h2{font-size:1rem;margin:0;font-weight:650}
+.table-wrap{overflow:auto}.table{width:100%;border-collapse:separate;border-spacing:0}.table th,.table td{padding:.72rem .65rem;border-bottom:1px solid var(--bs-border);text-align:left;font-size:.82rem;white-space:nowrap}.table th{color:var(--bs-muted);font-weight:600;background:#fafbfc}.table thead th:first-child{border-radius:.45rem 0 0 0}.table thead th:last-child{border-radius:0 .45rem 0 0}
+.money{font-variant-numeric:tabular-nums}.badge{display:inline-flex;padding:.28rem .55rem;border-radius:50rem;font-size:.7rem;font-weight:700}.badge.ok{background:#d1e7dd;color:#0f5132}.badge.warn{background:#fff3cd;color:#664d03}.badge.off{background:#e9ecef;color:#495057}
+.toolbar{display:flex;gap:.6rem;margin-bottom:.9rem;flex-wrap:wrap}.search{flex:1;min-width:220px;padding:.62rem .75rem;border:1px solid #ced4da;border-radius:.5rem;background:#fff;outline:0}.search:focus,input:focus,select:focus{border-color:#a77b5a;box-shadow:0 0 0 .2rem rgba(111,78,55,.14);outline:0}
+.product-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.8rem}.product{background:#fff;border:1px solid var(--bs-border);border-radius:.75rem;padding:.85rem;transition:.15s;cursor:pointer}.product:hover{transform:translateY(-1px);border-color:#d6c7bc;box-shadow:var(--shadow)}.product .emoji{font-size:1.7rem;width:48px;height:48px;border-radius:.65rem;background:#f4eee9;display:grid;place-items:center;margin-bottom:.65rem}.product h3{font-size:.9rem;margin:0 0 .25rem}.product p{font-size:.72rem;color:var(--bs-muted);margin:0 0 .7rem}.price{font-weight:750}.product .row{display:flex;justify-content:space-between;align-items:center}.mini{padding:.38rem .55rem;border-radius:.45rem;background:#f1e8e1;color:#5f412d;border:0;font-weight:650}
+.pos{display:grid;grid-template-columns:1.4fr .7fr;gap:1rem}.categories{display:flex;gap:.4rem;overflow:auto;margin-bottom:.75rem}.cat{white-space:nowrap;padding:.48rem .7rem;border-radius:.5rem;background:#fff;border:1px solid #dee2e6}.cat.active{background:var(--bs-primary);color:#fff;border-color:var(--bs-primary)}
+.cart{position:sticky;top:1rem;height:max-content}.cart-item{display:flex;justify-content:space-between;gap:.6rem;padding:.7rem 0;border-bottom:1px solid var(--bs-border)}.qty{display:flex;align-items:center;gap:.4rem}.qty button{width:28px;height:28px;border-radius:.4rem;background:#f1f3f5;border:0}.summary{margin-top:.8rem;display:grid;gap:.45rem}.summary div{display:flex;justify-content:space-between}.summary .total{font-size:1.1rem;font-weight:800;border-top:1px solid var(--bs-border);padding-top:.75rem}.pay{display:grid;grid-template-columns:1fr 1fr;gap:.4rem;margin-top:.75rem}.pay button{padding:.55rem;border:1px solid #dee2e6;border-radius:.45rem;background:#f8f9fa}.pay button.active{background:#212529;color:#fff;border-color:#212529}
+.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:.8rem}.field{display:grid;gap:.35rem}.field label{font-size:.72rem;color:var(--bs-muted);font-weight:650}.field input,.field select{padding:.6rem .7rem;border:1px solid #ced4da;border-radius:.5rem;outline:0;background:#fff}.full{grid-column:1/-1}
+.modal{position:fixed;inset:0;background:rgba(33,37,41,.5);display:none;place-items:center;z-index:30;padding:1rem}.modal.show{display:grid}.modal-box{background:#fff;border-radius:.85rem;padding:1.15rem;width:min(680px,100%);max-height:90vh;overflow:auto;box-shadow:0 1rem 3rem rgba(0,0,0,.18)}.modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem}.modal-head h2{margin:0;font-size:1.05rem}.close{background:#f1f3f5;border:0;border-radius:.45rem;padding:.4rem .55rem}
+.recipe-editor{display:grid;gap:.45rem;margin-top:.5rem}.recipe-row{display:grid;grid-template-columns:1.5fr .7fr .8fr auto;gap:.45rem;align-items:center}.recipe-row select,.recipe-row input{width:100%;padding:.55rem .6rem;border:1px solid #ced4da;border-radius:.45rem;background:#fff}.recipe-row .rCost{font-size:.78rem;text-align:right;font-weight:650}.recipe-cost{background:#f8f9fa;border:1px solid var(--bs-border);border-radius:.6rem;padding:.7rem;margin-top:.55rem}.hint{font-size:.72rem;color:var(--bs-muted);line-height:1.45}
+.toast{position:fixed;right:1rem;bottom:1rem;background:#212529;color:#fff;padding:.7rem .85rem;border-radius:.5rem;display:none;z-index:50;box-shadow:var(--shadow)}.toast.show{display:block}
+.empty{text-align:center;color:var(--bs-muted);padding:2rem .6rem}
 @media(max-width:1050px){.cards{grid-template-columns:repeat(2,1fr)}.product-grid{grid-template-columns:repeat(3,1fr)}.grid2,.pos{grid-template-columns:1fr}.cart{position:static}}
-@media(max-width:760px){.sidebar{width:72px;padding:14px 8px}.brand{padding:5px 6px 18px}.brand div:last-child,.nav button span:last-child{display:none}.nav button{justify-content:center;padding:12px}.main{margin-left:72px;width:calc(100% - 72px);padding:16px}.topbar h1{font-size:20px}.cards{grid-template-columns:1fr 1fr}.product-grid{grid-template-columns:1fr 1fr}.form-grid{grid-template-columns:1fr}.full{grid-column:auto}}
-@media(max-width:480px){.cards{grid-template-columns:1fr 1fr;gap:9px}.card{padding:13px}.metric strong{font-size:18px}.product-grid{grid-template-columns:1fr 1fr}.main{padding:12px}.topbar .actions .btn:not(.primary){display:none}}
-
-.recipe-editor{display:grid;gap:10px;margin-top:10px}
-.recipe-row{display:grid;grid-template-columns:1.5fr .8fr auto;gap:8px;align-items:center}
-.recipe-row select,.recipe-row input{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff}
-.recipe-cost{background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:10px}
-.recipe-empty{padding:12px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:13px}
-.hint{font-size:12px;color:var(--muted);line-height:1.45}
+@media(max-width:760px){.sidebar{width:72px;padding:.75rem .4rem}.brand{padding:.35rem .25rem 1rem}.brand div:last-child,.nav button span:last-child{display:none}.nav button{justify-content:center;padding:.65rem}.main{margin-left:72px;width:calc(100% - 72px);padding:1rem}.topbar h1{font-size:1.15rem}.cards{grid-template-columns:1fr 1fr}.product-grid{grid-template-columns:1fr 1fr}.form-grid{grid-template-columns:1fr}.full{grid-column:auto}.recipe-row{grid-template-columns:1.2fr .7fr auto}.recipe-row .rCost{display:none}}
+@media(max-width:480px){.cards{gap:.55rem}.card{padding:.75rem}.metric strong{font-size:1rem}.main{padding:.7rem}.topbar{align-items:flex-start}.topbar .actions .btn:not(.primary){display:none}.table th,.table td{padding:.6rem .5rem}.section-title{align-items:flex-start;flex-wrap:wrap}}
 </style>
 </head>
 <body>
@@ -45,7 +59,6 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
   <nav class="nav">
     <button class="active" data-page="dashboard"><span>▦</span><span>Dashboard</span></button>
     <button data-page="kasir"><span>🧾</span><span>Kasir</span></button>
-    <button data-page="menu"><span>☕</span><span>Menu</span></button>
     <button data-page="bahan"><span>📦</span><span>Bahan & HPP</span></button>
     <button data-page="pengeluaran"><span>💸</span><span>Pengeluaran</span></button>
     <button data-page="laporan"><span>📊</span><span>Laporan</span></button>
@@ -84,24 +97,40 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
  </div>
 </section>
 
-<section id="menu" class="page">
- <div class="card"><div class="section-title"><h2>Daftar Menu</h2><div class="actions"><button class="btn" onclick="deleteAllMenus()">Hapus Semua</button><button class="btn primary" onclick="openMenuModal()">+ Tambah Menu</button></div></div>
- <div class="toolbar"><input class="search" id="menuSearch" placeholder="Cari menu..." oninput="renderMenuTable()"></div>
- <div style="overflow:auto"><table class="table"><thead><tr><th>Menu</th><th>Kategori</th><th>Harga Jual</th><th>HPP Resep</th><th>Margin</th><th>Status</th><th></th></tr></thead><tbody id="menuTable"></tbody></table></div></div>
-</section>
+
 
 <section id="bahan" class="page">
- <div class="card"><div class="section-title"><h2>Bahan & Stok</h2><div class="actions"><button class="btn" onclick="openStockModal()">＋ Tambah Stok</button><button class="btn primary" onclick="openBahanModal()">+ Tambah Bahan</button></div></div>
- <div style="overflow:auto"><table class="table"><thead><tr><th>Bahan</th><th>Satuan</th><th>Harga/Satuan</th><th>Stok</th><th>Minimum</th><th>Status</th><th></th></tr></thead><tbody id="bahanTable"></tbody></table></div></div>
-  <div class="card" style="margin-top:18px">
-    <div class="section-title"><h2>Catatan Stok</h2><small style="color:var(--muted)">Stok berkurang otomatis dari penjualan berdasarkan resep</small></div>
-    <div id="stockInfo"></div>
+  <div class="card">
+    <div class="section-title">
+      <div><h2>Stok Bahan</h2><div class="hint">Daftar bahan yang menjadi sumber perhitungan HPP.</div></div>
+      <button class="btn primary" onclick="openBahanModal()">+ Tambah Bahan</button>
+    </div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr>
+          <th>Nama Bahan</th><th>Isi</th><th>Satuan</th><th>Jumlah</th>
+          <th>Harga / pcs</th><th>Total Nilai</th><th>Status</th><th>Aksi</th>
+        </tr></thead>
+        <tbody id="bahanTable"></tbody>
+      </table>
+    </div>
   </div>
-  <div class="card" style="margin-top:18px">
-    <div class="section-title"><h2>Riwayat Tambah Stok</h2></div>
-    <div style="overflow:auto"><table class="table"><thead><tr><th>Tanggal</th><th>Bahan</th><th>Qty</th><th>Harga/Satuan</th><th>Total</th><th>Keterangan</th></tr></thead><tbody id="stockMoveTable"></tbody></table></div>
+
+  <div class="card" style="margin-top:1rem">
+    <div class="section-title">
+      <div><h2>HPP & Resep Menu</h2><div class="hint">HPP menu dihitung otomatis dari bahan di atas.</div></div>
+      <div class="actions">
+        <button class="btn" onclick="deleteAllMenus()">Hapus Semua Menu</button>
+        <button class="btn primary" onclick="openMenuModal()">+ Tambah Menu</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>Menu</th><th>Kategori</th><th>Harga Jual</th><th>HPP</th><th>Laba</th><th>Food Cost</th><th>Status</th><th>Aksi</th></tr></thead>
+        <tbody id="menuTableBahan"></tbody>
+      </table>
+    </div>
   </div>
- <div class="card" style="margin-top:18px"><div class="section-title"><h2>Contoh Resep & HPP</h2><small style="color:var(--muted)">HPP menu dihitung otomatis dari resep & harga bahan · Riwayat transaksi memakai snapshot HPP</small></div><div id="recipeInfo"></div></div>
 </section>
 
 <section id="pengeluaran" class="page">
@@ -139,18 +168,22 @@ let db=JSON.parse(localStorage.getItem(KEY)||'null')||{
 };
 if(!Array.isArray(db.stockMoves))db.stockMoves=[];
 
-// Remove only the original demo menu/recipe records from an existing installation.
-// User-created menus are preserved.
-(function removeOriginalDemoMenus(){
-  const demoNames=['Es Kopi Susu','Americano','Cappuccino','Matcha Latte','Teh Manis','Kentang Goreng'];
-  const demoIds=new Set([1,2,3,4,5,6]);
-  const hasOnlyDemo=db.menus.length>0 && db.menus.every(m=>demoNames.includes(m.name)&&demoIds.has(m.id));
-  if(hasOnlyDemo){
-    db.menus=[];
-    db.recipes=[];
-    save();
-  }
-})();
+
+
+
+// Migrasi struktur bahan lama ke format: isi kemasan + jumlah kemasan + harga/pcs.
+if(!Array.isArray(db.menus))db.menus=[];
+if(!Array.isArray(db.bahan))db.bahan=[];
+if(!Array.isArray(db.recipes))db.recipes=[];
+if(!Array.isArray(db.stockMoves))db.stockMoves=[];
+db.bahan.forEach(b=>{
+  if(b.content==null)b.content=1;
+  if(!b.unit)b.unit='pcs';
+  if(b.cost==null)b.cost=0;
+  if(b.stock==null)b.stock=0;
+  if(b.min==null)b.min=0;
+});
+const MENU_CATS=['Minuman','Makanan','Snack'];
 
 let cart=[], pay='Tunai', activeCat='Semua';
 const rupiah=n=>new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n||0);
@@ -160,7 +193,7 @@ function toast(s){let e=document.getElementById('toast');e.textContent=s;e.class
 function go(page){
  document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));document.getElementById(page).classList.add('active');
  document.querySelectorAll('.nav button').forEach(x=>x.classList.toggle('active',x.dataset.page===page));
- const titles={dashboard:'Dashboard',kasir:'Kasir',menu:'Menu',bahan:'Bahan & HPP',pengeluaran:'Pengeluaran',laporan:'Laporan',pengaturan:'Pengaturan'};
+ const titles={dashboard:'Dashboard',kasir:'Kasir',bahan:'Bahan & HPP',pengeluaran:'Pengeluaran',laporan:'Laporan',pengaturan:'Pengaturan'};
  document.getElementById('pageTitle').textContent=titles[page]; renderAll();
 }
 document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>go(b.dataset.page));
@@ -228,7 +261,7 @@ function checkout(){
   for(const name in stockNeed){
     const b=db.bahan.find(x=>x.name===name);
     if(!b)return toast(`Bahan ${name} tidak ditemukan`);
-    if((+b.stock||0)<stockNeed[name]){
+    if(((+b.stock||0)*(+(b.content||1)))<stockNeed[name]){
       return toast(`Stok ${name} tidak cukup`);
     }
   }
@@ -252,7 +285,9 @@ function checkout(){
   // Kurangi stok berdasarkan snapshot resep transaksi.
   for(const name in stockNeed){
     const b=db.bahan.find(x=>x.name===name);
-    b.stock=(+b.stock||0)-stockNeed[name];
+    const content=+(b.content||1);
+    const consumedPackages=stockNeed[name]/content;
+    b.stock=Math.max(0,(+b.stock||0)-consumedPackages);
   }
 
   save();
@@ -262,22 +297,28 @@ function checkout(){
   renderAll();
 }
 function recipeRowsHtml(items=[]){
-  if(!items.length) return '<div class="recipe-empty" id="recipeEmpty">Belum ada bahan. Klik <b>+ Bahan</b> untuk membuat resep.</div>';
-  return items.map((it,i)=>`<div class="recipe-row">
-    <select class="rName">${db.bahan.map(b=>`<option value="${String(b.name).replace(/"/g,'&quot;')}" ${b.name===it[0]?'selected':''}>${b.name} (${b.unit})</option>`).join('')}</select>
-    <input class="rQty" type="number" min="0" step="any" value="${it[1]}">
-    <button class="btn" type="button" onclick="this.parentElement.remove();updateRecipeCost()">✕</button>
-  </div>`).join('');
+  if(!items.length)return '<div class="recipe-empty" id="recipeEmpty">Belum ada bahan dalam resep.</div>';
+  return items.map(it=>{
+    const b=db.bahan.find(x=>x.name===it[0]);
+    const c=baseCostOf(b);
+    return `<div class="recipe-row">
+      <select class="rName" onchange="updateRecipeCost()">${db.bahan.filter(x=>x.active!==false).map(x=>`<option value="${String(x.name).replace(/"/g,'&quot;')}" ${x.name===it[0]?'selected':''}>${x.name} (${x.unit})</option>`).join('')}</select>
+      <input class="rQty" type="number" min="0" step="any" value="${it[1]}" oninput="updateRecipeCost()">
+      <span class="rCost">${rupiah(c*(+it[1]||0))}</span>
+      <button class="btn" type="button" onclick="this.parentElement.remove();updateRecipeCost()">✕</button>
+    </div>`;
+  }).join('');
 }
 function addRecipeRow(){
-  const wrap=document.getElementById('recipeRows');
-  if(!wrap)return;
-  const empty=document.getElementById('recipeEmpty'); if(empty) empty.remove();
+  const wrap=document.getElementById('recipeRows'); if(!wrap)return;
+  const empty=document.getElementById('recipeEmpty'); if(empty)empty.remove();
+  if(!db.bahan.filter(x=>x.active!==false).length)return toast('Tambahkan bahan terlebih dahulu');
   const div=document.createElement('div'); div.className='recipe-row';
-  div.innerHTML=`<select class="rName">${db.bahan.map(b=>`<option value="${String(b.name).replace(/"/g,'&quot;')}">${b.name} (${b.unit})</option>`).join('')}</select>
-  <input class="rQty" type="number" min="0" step="any" value="1">
-  <button class="btn" type="button" onclick="this.parentElement.remove();updateRecipeCost()">✕</button>`;
-  wrap.appendChild(div); updateRecipeCost();
+  div.innerHTML=`<select class="rName" onchange="updateRecipeCost()">${db.bahan.filter(x=>x.active!==false).map(b=>`<option value="${String(b.name).replace(/"/g,'&quot;')}">${b.name} (${b.unit})</option>`).join('')}</select>
+    <input class="rQty" type="number" min="0" step="any" value="1" oninput="updateRecipeCost()">
+    <span class="rCost">${rupiah(baseCostOf(db.bahan.find(x=>x.active!==false))||0)}</span>
+    <button class="btn" type="button" onclick="this.parentElement.remove();updateRecipeCost()">✕</button>`;
+  wrap.appendChild(div);updateRecipeCost();
 }
 function getRecipeFromForm(){
   return [...document.querySelectorAll('#recipeRows .recipe-row')].map(row=>{
@@ -287,29 +328,39 @@ function getRecipeFromForm(){
 }
 function updateRecipeCost(){
   const items=getRecipeFromForm(), cost=calcRecipeCost(items);
-  const e=document.getElementById('recipeCost'); if(e)e.textContent=rupiah(cost);
-  const h=document.getElementById('fHpp'); if(h){h.value=cost; h.readOnly=true;}
+  const e=document.getElementById('recipeCost');if(e)e.textContent=rupiah(cost);
   const p=+(document.getElementById('fPrice')?.value||0);
-  const m=document.getElementById('marginInfo'); if(m)m.textContent=p>0?`Margin kotor: ${rupiah(p-cost)} (${((p-cost)/p*100).toFixed(1)}%)`:'Masukkan harga jual untuk melihat margin';
+  const m=document.getElementById('marginInfo');
+  if(m){
+    const profit=p-cost,fc=p>0?(cost/p*100):0;
+    m.innerHTML=p>0?`Laba kotor: <b>${rupiah(profit)}</b> · Food Cost: <b>${fc.toFixed(1)}%</b>`:'Masukkan harga jual untuk melihat laba & food cost';
+  }
+  document.querySelectorAll('#recipeRows .recipe-row').forEach(row=>{
+    const b=db.bahan.find(x=>x.name===row.querySelector('.rName')?.value);
+    const q=+(row.querySelector('.rQty')?.value||0);
+    const c=row.querySelector('.rCost');if(c)c.textContent=rupiah(baseCostOf(b)*q);
+  });
 }
 function openMenuModal(id=null){
-  let m=id?db.menus.find(x=>x.id===id):{name:'',cat:'Kopi',price:'',hpp:0,emoji:'☕',active:true};
+  if(!db.bahan.filter(x=>x.active!==false).length)return toast('Tambahkan bahan terlebih dahulu');
+  let m=id?db.menus.find(x=>x.id===id):{name:'',cat:'Minuman',price:'',hpp:0,emoji:'☕',active:true};
   const rec=id?recipeForMenu(id):{items:[]};
   openModal(id?'Edit Menu':'Tambah Menu',`
     <div class="form-grid">
       <div class="field"><label>NAMA MENU</label><input id="fName" value="${m.name}"></div>
-      <div class="field"><label>KATEGORI</label><input id="fCat" value="${m.cat}"></div>
+      <div class="field"><label>KATEGORI</label><select id="fCat">${MENU_CATS.map(c=>`<option ${m.cat===c?'selected':''}>${c}</option>`).join('')}</select></div>
       <div class="field"><label>HARGA JUAL</label><input id="fPrice" type="number" min="0" value="${m.price}" oninput="updateRecipeCost()"></div>
-      <div class="field"><label>HPP / PORSI (OTOMATIS)</label><input id="fHpp" type="number" value="${m.hpp}" readonly></div>
+      <div class="field"><label>HPP OTOMATIS</label><input id="fHpp" type="text" value="${rupiah(calcRecipeCost(rec.items))}" readonly></div>
       <div class="field"><label>IKON</label><input id="fEmoji" value="${m.emoji||'☕'}"></div>
-      <div class="field full"><label>RESEP / BAHAN PER PORSI</label>
-        <div class="hint">Pilih bahan dan jumlah pemakaian per 1 porsi. HPP dihitung otomatis dari harga satuan bahan.</div>
+      <div class="field full">
+        <label>KOMPOSISI / RESEP PER PORSI</label>
+        <div class="hint">Pilih bahan dari Stok Bahan. Harga dasar dihitung dari harga/pcs ÷ isi. HPP akan tampil otomatis.</div>
         <div id="recipeRows" class="recipe-editor">${recipeRowsHtml(rec.items)}</div>
-        <button class="btn" type="button" style="margin-top:8px" onclick="addRecipeRow()">+ Bahan</button>
-        <div class="recipe-cost"><b>HPP resep: <span id="recipeCost">${rupiah(calcRecipeCost(rec.items))}</span></b><div class="hint" id="marginInfo"></div></div>
+        <button class="btn" type="button" style="margin-top:.5rem" onclick="addRecipeRow()">+ Tambah Bahan</button>
+        <div class="recipe-cost"><b>HPP: <span id="recipeCost">${rupiah(calcRecipeCost(rec.items))}</span></b><div class="hint" id="marginInfo"></div></div>
       </div>
     </div>
-    <button class="btn primary" style="margin-top:15px" onclick="saveMenu(${id||0})">Simpan Menu</button>`);
+    <button class="btn primary" style="margin-top:1rem" onclick="saveMenu(${id||0})">Simpan Menu</button>`);
   updateRecipeCost();
 }
 function editMenu(id){openMenuModal(id)}
@@ -327,24 +378,18 @@ function deleteAllMenus(){
   if(!confirm('Hapus SEMUA menu dan resep? Data transaksi lama tetap aman.'))return;
   db.menus=[];db.recipes=[];cart=[];save();renderAll();toast('Semua menu dihapus');
 }
-function saveMenu(id){let x={id:id||db.nextId++,name:fName.value,cat:fCat.value||'Lainnya',price:+fPrice.value||0,hpp:+fHpp.value||0,emoji:fEmoji.value||'☕',active:true};if(id)db.menus=db.menus.map(m=>m.id===id?x:m);else db.menus.push(x);save();closeModal();renderAll();toast('Menu tersimpan')}
-function openBahanModal(id=null){let b=id?db.bahan.find(x=>x.id===id):{name:'',unit:'gram',cost:'',stock:'',min:''};openModal(id?'Edit Bahan':'Tambah Bahan',`<div class="form-grid"><div class="field"><label>NAMA BAHAN</label><input id="bName" value="${b.name}"></div><div class="field"><label>SATUAN</label><input id="bUnit" value="${b.unit}"></div><div class="field"><label>HARGA / SATUAN</label><input id="bCost" type="number" value="${b.cost}"></div><div class="field"><label>STOK</label><input id="bStock" type="number" value="${b.stock}"></div><div class="field"><label>MINIMUM STOK</label><input id="bMin" type="number" value="${b.min}"></div></div><button class="btn primary" style="margin-top:15px" onclick="saveBahan(${id||0})">Simpan</button>`)}
-function editBahan(id){openBahanModal(id)}
-function saveBahan(id){let x={id:id||db.nextId++,name:bName.value,unit:bUnit.value||'pcs',cost:+bCost.value||0,stock:+bStock.value||0,min:+bMin.value||0};if(id)db.bahan=db.bahan.map(b=>b.id===id?x:b);else db.bahan.push(x);save();closeModal();renderAll();toast('Bahan tersimpan')}
-function openStockModal(){
-  if(!db.bahan.length){
-    return toast('Tambahkan bahan terlebih dahulu');
-  }
-  const options=db.bahan.map(b=>`<option value="${b.id}">${b.name} (${b.unit})</option>`).join('');
-  openModal('Tambah Stok',`
-    <div class="form-grid">
-      <div class="field"><label>BAHAN</label><select id="sBahan">${options}</select></div>
-      <div class="field"><label>JUMLAH STOK MASUK</label><input id="sQty" type="number" min="0" step="any" placeholder="0"></div>
-      <div class="field"><label>HARGA BELI / SATUAN</label><input id="sCost" type="number" min="0" step="any" placeholder="Opsional"></div>
-      <div class="field full"><label>KETERANGAN</label><input id="sNote" placeholder="Contoh: pembelian dari supplier"></div>
-    </div>
-    <div class="hint" style="margin-top:10px">Harga beli yang dimasukkan akan menjadi harga bahan terbaru dan digunakan untuk menghitung HPP menu berikutnya. HPP transaksi lama tetap aman.</div>
-    <button class="btn primary" style="margin-top:15px" onclick="saveStock()">Simpan Stok</button>`);
+function saveMenu(id){
+  const recipe=getRecipeFromForm(),hpp=calcRecipeCost(recipe);
+  if(!fName.value.trim())return toast('Nama menu wajib diisi');
+  if(!MENU_CATS.includes(fCat.value))return toast('Kategori tidak valid');
+  if(!recipe.length)return toast('Tambahkan minimal 1 bahan ke resep');
+  if(!(+fPrice.value>0))return toast('Masukkan harga jual');
+  const old=id?db.menus.find(m=>m.id===id):null;
+  const x={id:id||db.nextId++,name:fName.value.trim(),cat:fCat.value,price:+fPrice.value,hpp,emoji:fEmoji.value||'☕',active:old?old.active:true};
+  if(id)db.menus=db.menus.map(m=>m.id===id?x:m);else db.menus.push(x);
+  db.recipes=db.recipes.filter(r=>r.menuId!==x.id);
+  db.recipes.push({menuId:x.id,items:recipe});
+  save();closeModal();renderAll();toast('Menu & HPP tersimpan');
 }
 function openStockModalFor(id){
   openStockModal();
@@ -390,16 +435,6 @@ function saveSettings(){db.settings={name:shopName.value,phone:shopPhone.value,a
 function backup(){let blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='backup-kopikasir-'+today()+'.json';a.click();URL.revokeObjectURL(a.href);toast('Backup dibuat')}
 function restore(file){if(!file)return;let r=new FileReader();r.onload=()=>{try{let x=JSON.parse(r.result);if(!x.menus||!x.transactions)throw 0;db=x;save();renderAll();toast('Data berhasil dipulihkan')}catch(e){toast('File backup tidak valid')}};r.readAsText(file)}
 function exportCSV(){let rows=[['Tanggal','Waktu','Item','Pembayaran','Omzet','HPP','Laba'],...db.transactions.map(t=>[t.date,t.time,t.items.map(i=>i.name+' x'+i.qty).join(' | '),t.pay,t.total,t.hpp,t.total-t.hpp])];let csv=rows.map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(',')).join('\n');let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='laporan-kopikasir.csv';a.click()}
-function renderStockInfo(){
-  const el=document.getElementById('stockInfo'); if(!el)return;
-  const used={};
-  db.transactions.forEach(t=>t.items.forEach(i=>{
-    const rec=recipeForMenu(i.id).items||[];
-    rec.forEach(([name,q])=>used[name]=(used[name]||0)+q*i.qty);
-  }));
-  const rows=db.bahan.map(b=>`<div class="cart-item"><div><b>${b.name}</b><small style="display:block;color:var(--muted)">Stok sekarang: ${b.stock} ${b.unit} · Terpakai tercatat: ${used[b.name]||0} ${b.unit}</small></div><span class="badge ${b.stock>b.min?'ok':'warn'}">${b.stock>b.min?'Aman':'Menipis'}</span></div>`).join('');
-  el.innerHTML=rows||'<div class="empty">Belum ada bahan.</div>';
-}
 function getTransactionHpp(t){
   // Transaksi lama memakai snapshot HPP yang tersimpan.
   // Tidak pernah mengambil ulang harga bahan saat ini.
@@ -411,7 +446,7 @@ function transactionSnapshotText(t){
     return `${i.name} ×${i.qty} — HPP ${rupiah(h)}`;
   }).join(' | ');
 }
-function renderAll(){metrics();renderRecent();renderLow();renderCats();renderProducts();renderCart();renderMenuTable();renderBahan();renderStockInfo();renderStockMoves();renderExpenses();renderReport();shopName.value=db.settings.name;shopPhone.value=db.settings.phone;shopAddress.value=db.settings.address}
+function renderAll(){metrics();renderRecent();renderLow();renderCats();renderProducts();renderCart();renderMenuTable();renderBahan();renderExpenses();renderReport();shopName.value=db.settings.name;shopPhone.value=db.settings.phone;shopAddress.value=db.settings.address}
 renderAll();
 </script>
 </body>
