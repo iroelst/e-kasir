@@ -58,6 +58,10 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
 }
 
 
+/* ===== CLOUD SYNC ===== */
+.cloud-dot{font-size:12px;color:#6b7280;display:inline-flex;align-items:center;gap:5px;padding:8px 10px;border-radius:10px;background:#f8fafc;border:1px solid #e5e7eb;white-space:nowrap}.cloud-dot.ok{color:#166534;background:#dcfce7;border-color:#bbf7d0}.cloud-dot.sync{color:#92400e;background:#fef3c7;border-color:#fde68a}.cloud-dot.err{color:#991b1b;background:#fee2e2;border-color:#fecaca}
+@media(max-width:760px){.cloud-dot{display:none}}
+
 /* ===== LOGIN USERNAME + PASSWORD ===== */
 .auth-screen{position:fixed;inset:0;z-index:100;background:linear-gradient(135deg,#111827 0%,#2b2118 100%);display:grid;place-items:center;padding:20px}
 .auth-card{width:min(430px,100%);background:#fff;border-radius:24px;padding:28px;box-shadow:0 25px 80px rgba(0,0,0,.28)}
@@ -106,7 +110,7 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
 </aside>
 
 <main class="main">
-<section class="topbar"><div><h1 id="pageTitle">Dashboard</h1><p id="dateText"></p></div><div class="actions"><div id="userChip" class="user-chip"></div><button class="btn" onclick="backup()">💾 Backup</button><button class="btn primary" onclick="go('kasir')">+ Transaksi</button></div></section>
+<section class="topbar"><div><h1 id="pageTitle">Dashboard</h1><p id="dateText"></p></div><div class="actions"><div id="userChip" class="user-chip"></div><span id="cloudStatus" class="cloud-dot">☁️ Belum tersinkron</span><button class="btn" onclick="backup()">💾 Backup</button><button class="btn primary" onclick="go('kasir')">+ Transaksi</button></div></section>
 
 <section id="dashboard" class="page active">
  <div class="cards">
@@ -216,17 +220,22 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
  </div>
  
  <div class="card settings-auth">
-  <div class="section-title"><h2>Akun & Cloud</h2></div>
-  <div class="hint">Login memakai username + password. Password tidak disimpan di HTML atau localStorage. Masukkan Project URL dan anon/public key cloud Anda.</div>
+  <div class="section-title"><h2>Akun & Firebase</h2></div>
+  <div class="hint">Login, database, dan penyimpanan logo menggunakan Firebase. Firebase Web Config boleh disimpan di aplikasi; keamanan data tetap diatur dengan Authentication, Firestore Rules, dan Storage Rules.</div>
   <div class="form-grid" style="margin-top:12px">
-   <div class="field"><label>PROJECT URL</label><input id="cloudUrl" placeholder="https://xxxxx.supabase.co"></div>
-   <div class="field"><label>ANON / PUBLIC KEY</label><input id="cloudAnonKey" type="password" placeholder="Masukkan anon/public key"></div>
+   <div class="field"><label>API KEY</label><input id="fbApiKey" placeholder="AIzaSy..."></div>
+   <div class="field"><label>AUTH DOMAIN</label><input id="fbAuthDomain" placeholder="project-id.firebaseapp.com"></div>
+   <div class="field"><label>PROJECT ID</label><input id="fbProjectId" placeholder="project-id"></div>
+   <div class="field"><label>STORAGE BUCKET</label><input id="fbStorageBucket" placeholder="project-id.firebasestorage.app"></div>
+   <div class="field"><label>MESSAGING SENDER ID</label><input id="fbMessagingSenderId" placeholder="1234567890"></div>
+   <div class="field"><label>APP ID</label><input id="fbAppId" placeholder="1:1234567890:web:..."></div>
   </div>
-  <button class="btn primary" style="margin-top:12px" onclick="saveCloudConfig()">Simpan Konfigurasi Cloud</button>
+  <button class="btn primary" style="margin-top:12px" onclick="saveFirebaseConfig()">Simpan & Hubungkan Firebase</button>
+  <button class="btn" style="margin-top:10px" onclick="syncCloud(true)">☁️ Sinkronkan Sekarang</button>
   <button class="btn danger" style="margin-top:10px" onclick="logout()">Keluar dari Akun</button>
  </div>
 
-<div class="card" style="margin-top:18px"><div class="section-title"><h2>Data</h2></div><p style="color:var(--muted);font-size:13px">Data aplikasi dipisahkan berdasarkan username pada perangkat. Login menggunakan akun cloud; sinkronisasi database cloud akan menjadi tahap berikutnya.</p><button class="btn" onclick="backup()">💾 Backup JSON</button> <label class="btn">📥 Restore JSON<input type="file" accept=".json" hidden onchange="restore(this.files[0])"></label></div>
+<div class="card" style="margin-top:18px"><div class="section-title"><h2>Data</h2></div><p style="color:var(--muted);font-size:13px">Data aplikasi dipisahkan berdasarkan username dan disinkronkan ke database cloud. Perubahan pada perangkat akan dikirim otomatis setelah data disimpan.</p><button class="btn" onclick="backup()">💾 Backup JSON</button> <label class="btn">📥 Restore JSON<input type="file" accept=".json" hidden onchange="restore(this.files[0])"></label></div>
 </section>
 </main>
 </div>
@@ -234,13 +243,19 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
 <div class="modal" id="modal"><div class="modal-box"><div class="modal-head"><h2 id="modalTitle"></h2><button class="close" onclick="closeModal()">✕</button></div><div id="modalBody"></div></div></div>
 <div class="toast" id="toast"></div>
 
+<script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-storage-compat.js"></script>
 <script>
-const BASE_KEY='kopikasir_v4';
+const BASE_KEY='ekasir_v5';
 const AUTH_KEY='ekasir_auth_session';
-const CLOUD_KEY='ekasir_cloud_config';
+const FIREBASE_KEY='ekasir_firebase_config';
 let currentUser=null;
 let KEY=BASE_KEY;
 let db={};
+let firebaseReady=false;
+let cloudSyncTimer=null, cloudApplying=false, cloudBusy=false;
 
 function blankDb(){return {
   settings:{name:'KopiKasir Coffee',phone:'',address:'',logo:''},
@@ -248,29 +263,120 @@ function blankDb(){return {
 }}
 function usernameEmail(username){return String(username||'').trim().toLowerCase()+'@login.ekasir.local'}
 function validUsername(u){return /^[a-zA-Z0-9._-]{3,30}$/.test(String(u||''))}
-function cloudConfig(){try{return JSON.parse(localStorage.getItem(CLOUD_KEY)||'null')||{}}catch(e){return {}}}
-function loadCloudConfigToForm(){
-  const c=cloudConfig();
-  if(document.getElementById('cloudUrl'))document.getElementById('cloudUrl').value=c.url||'';
-  if(document.getElementById('cloudAnonKey'))document.getElementById('cloudAnonKey').value=c.key||'';
+function firebaseConfig(){try{return JSON.parse(localStorage.getItem(FIREBASE_KEY)||'null')||{}}catch(e){return {}}}
+function getFirebaseConfigFromForm(){return {
+  apiKey:(document.getElementById('fbApiKey')?.value||'').trim(),
+  authDomain:(document.getElementById('fbAuthDomain')?.value||'').trim(),
+  projectId:(document.getElementById('fbProjectId')?.value||'').trim(),
+  storageBucket:(document.getElementById('fbStorageBucket')?.value||'').trim(),
+  messagingSenderId:(document.getElementById('fbMessagingSenderId')?.value||'').trim(),
+  appId:(document.getElementById('fbAppId')?.value||'').trim()
+}}
+function loadFirebaseConfigToForm(){
+  const c=firebaseConfig();
+  const map={fbApiKey:'apiKey',fbAuthDomain:'authDomain',fbProjectId:'projectId',fbStorageBucket:'storageBucket',fbMessagingSenderId:'messagingSenderId',fbAppId:'appId'};
+  Object.entries(map).forEach(([id,k])=>{const el=document.getElementById(id);if(el)el.value=c[k]||''});
 }
-function saveCloudConfig(){
-  const url=(document.getElementById('cloudUrl')?.value||'').trim().replace(/\/$/,'');
-  const key=(document.getElementById('cloudAnonKey')?.value||'').trim();
-  if(!/^https:\/\/[^\s]+\.supabase\.co$/i.test(url))return toast('Project URL cloud tidak valid');
-  if(!key)return toast('Anon/public key wajib diisi');
-  localStorage.setItem(CLOUD_KEY,JSON.stringify({url,key}));
-  toast('Konfigurasi cloud tersimpan');
+function validFirebaseConfig(c){return !!(c.apiKey&&c.authDomain&&c.projectId&&c.storageBucket&&c.appId)}
+function initFirebase(config){
+  if(!validFirebaseConfig(config))throw new Error('Konfigurasi Firebase belum lengkap. Isi API Key, Auth Domain, Project ID, Storage Bucket, dan App ID.');
+  try{
+    if(firebase.apps.length){
+      const app=firebase.app();
+      const old=app.options||{};
+      if(old.projectId!==config.projectId){firebase.app().delete();firebase.initializeApp(config)}
+    }else firebase.initializeApp(config);
+    window.fbAuth=firebase.auth();
+    window.fbDb=firebase.firestore();
+    window.fbStorage=firebase.storage();
+    fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
+    firebaseReady=true;
+    return true;
+  }catch(e){firebaseReady=false;throw e}
 }
-function cloudHeaders(c){return {'Content-Type':'application/json','apikey':c.key}}
-async function supa(path,options={}){
-  const c=cloudConfig();
-  if(!c.url||!c.key)throw new Error('Project URL dan anon/public key belum diatur.');
-  const res=await fetch(c.url+path,{...options,headers:{...cloudHeaders(c),...(options.headers||{})}});
-  let data=null;try{data=await res.json()}catch(e){}
-  if(!res.ok)throw new Error(data?.msg||data?.message||data?.error_description||data?.error||('HTTP '+res.status));
-  return data;
+function ensureFirebase(){
+  if(firebaseReady&&window.fbAuth&&window.fbDb&&window.fbStorage)return true;
+  initFirebase(firebaseConfig());
+  return true;
 }
+function saveFirebaseConfig(){
+  const c=getFirebaseConfigFromForm();
+  if(!validFirebaseConfig(c))return toast('Konfigurasi Firebase belum lengkap');
+  try{
+    localStorage.setItem(FIREBASE_KEY,JSON.stringify(c));
+    initFirebase(c);
+    toast('Firebase terhubung');
+    if(currentUser?.uid)setTimeout(()=>syncCloud(true),150);
+  }catch(e){toast('Firebase gagal dihubungkan: '+(e.message||'periksa konfigurasi'))}
+}
+function setCloudStatus(text,type=''){
+  const el=document.getElementById('cloudStatus');if(!el)return;
+  el.textContent=text;el.className='cloud-dot '+type;
+}
+function userId(){return currentUser?.uid||fbAuth?.currentUser?.uid||''}
+function localHasData(){
+  return !!(db.menus?.length||db.bahan?.length||db.recipes?.length||db.transactions?.length||db.expenses?.length||db.purchases?.length||Object.keys(db.stockPeriods||{}).length);
+}
+function scheduleCloudSync(){
+  if(cloudApplying||!userId())return;
+  if(!firebaseReady){setCloudStatus('☁️ Firebase belum terhubung');return}
+  clearTimeout(cloudSyncTimer);
+  setCloudStatus('☁️ Menunggu sinkronisasi','sync');
+  cloudSyncTimer=setTimeout(()=>syncCloud(false),800);
+}
+async function pullCloud(){
+  ensureFirebase();
+  const uid=userId();if(!uid)throw new Error('Sesi Firebase belum siap.');
+  const snap=await fbDb.collection('ekasir_data').doc(uid).get();
+  if(!snap.exists)return null;
+  const x=snap.data()||{};
+  return {data:x.data||blankDb(),updated_at:x.updatedAtMs||0};
+}
+async function pushCloud(){
+  ensureFirebase();
+  const uid=userId();if(!uid)throw new Error('Sesi Firebase belum siap.');
+  const now=Date.now();
+  await fbDb.collection('ekasir_data').doc(uid).set({
+    userId:uid,
+    data:db,
+    updatedAtMs:now,
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+  },{merge:true});
+  localStorage.setItem(KEY+'_cloud_updated_at',String(now));
+  return now;
+}
+async function syncCloud(force=false){
+  if(cloudBusy)return;
+  if(!userId()){setCloudStatus('☁️ Belum login');return;}
+  try{ensureFirebase()}catch(e){setCloudStatus('☁️ Firebase belum diatur','err');if(force)toast(e.message);return}
+  cloudBusy=true;setCloudStatus('☁️ Menyinkronkan...','sync');
+  try{
+    const remote=await pullCloud();
+    if(!remote){await pushCloud();setCloudStatus('☁️ Tersinkron','ok');return}
+    const remoteStamp=Number(remote.updated_at||0);
+    const localStamp=Number(localStorage.getItem(KEY+'_cloud_updated_at')||0);
+    if(force){
+      const useCloud=confirm('Data Firebase ditemukan.\n\nOK = gunakan data Firebase di perangkat ini.\nBatal = pertahankan data perangkat ini dan kirim ke Firebase.');
+      if(useCloud){cloudApplying=true;db=remote.data||blankDb();normalizeDb();saveLocalOnly();renderAll();cloudApplying=false;localStorage.setItem(KEY+'_cloud_updated_at',String(remoteStamp||Date.now()));}
+      else await pushCloud();
+    }else if(!localHasData()){
+      cloudApplying=true;db=remote.data||blankDb();normalizeDb();saveLocalOnly();renderAll();cloudApplying=false;localStorage.setItem(KEY+'_cloud_updated_at',String(remoteStamp||Date.now()));
+    }else if(localStamp && remoteStamp<=localStamp){
+      // Data perangkat sudah diketahui sama/lebih baru.
+      if(remoteStamp<localStamp)await pushCloud();
+    }else{
+      const useCloud=confirm('Data Firebase lebih baru tersedia.\n\nOK = ambil data Firebase.\nBatal = pertahankan data perangkat ini dan kirim ke Firebase.');
+      if(useCloud){cloudApplying=true;db=remote.data||blankDb();normalizeDb();saveLocalOnly();cloudApplying=false;localStorage.setItem(KEY+'_cloud_updated_at',String(remoteStamp||Date.now()));renderAll();}
+      else await pushCloud();
+    }
+    setCloudStatus('☁️ Tersinkron','ok');
+  }catch(e){
+    console.error('Firebase sync:',e);
+    setCloudStatus('☁️ Sinkron gagal','err');
+    if(force)toast('Sinkronisasi gagal: '+(e.message||'periksa Firestore Rules'));
+  }finally{cloudBusy=false}
+}
+function saveLocalOnly(){localStorage.setItem(KEY,JSON.stringify(db));}
 function showAuthMessage(msg,type='err'){
   const el=document.getElementById('authMsg');if(!el)return;
   el.textContent=msg;el.className='auth-msg show '+type;
@@ -295,32 +401,37 @@ async function submitAuth(ev){
   if(authMode==='register'&&p!==document.getElementById('authPassword2').value)return showAuthMessage('Konfirmasi password tidak sama.');
   const btn=document.getElementById('authSubmit');btn.disabled=true;btn.textContent='Memproses...';
   try{
+    ensureFirebase();
     const email=usernameEmail(u);
+    let cred;
     if(authMode==='register'){
-      await supa('/auth/v1/signup',{method:'POST',body:JSON.stringify({email,password:p,data:{username:u}})});
-      const session=await supa('/auth/v1/token?grant_type=password',{method:'POST',body:JSON.stringify({email,password:p})});
-      await finishLogin(u,session);
+      cred=await fbAuth.createUserWithEmailAndPassword(email,p);
+      await cred.user.updateProfile({displayName:u});
+      await fbDb.collection('users').doc(cred.user.uid).set({username:u,createdAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
       showAuthMessage('Akun berhasil dibuat.','ok');
     }else{
-      const session=await supa('/auth/v1/token?grant_type=password',{method:'POST',body:JSON.stringify({email,password:p})});
-      await finishLogin(u,session);
+      cred=await fbAuth.signInWithEmailAndPassword(email,p);
     }
+    await finishLogin(u,cred.user);
   }catch(e){
-    let msg=e.message||'Login gagal';
-    if(/email not confirmed/i.test(msg))msg='Email Confirmation masih aktif. Untuk login username/password ini, matikan konfirmasi email di Auth.';
-    if(/invalid login credentials/i.test(msg))msg='Username atau password salah.';
+    let msg=e.code||e.message||'Login gagal';
+    if(/auth\/invalid-credential|auth\/wrong-password|auth\/user-not-found/i.test(msg))msg='Username atau password salah.';
+    else if(/auth\/email-already-in-use/i.test(msg))msg='Username sudah digunakan.';
+    else if(/auth\/weak-password/i.test(msg))msg='Password terlalu lemah. Gunakan minimal 6 karakter.';
+    else if(/auth\/operation-not-allowed/i.test(msg))msg='Email/Password belum diaktifkan di Firebase Authentication.';
     showAuthMessage(msg);
   }finally{btn.disabled=false;btn.textContent=authMode==='login'?'Masuk':'Daftar'}
 }
-async function finishLogin(username,session){
-  if(!session?.access_token)throw new Error('Token login tidak diterima.');
-  currentUser={username,access_token:session.access_token,refresh_token:session.refresh_token||'',user:session.user||null};
+async function finishLogin(username,user){
+  if(!user?.uid)throw new Error('Akun Firebase tidak valid.');
+  currentUser={username,uid:user.uid,email:user.email||usernameEmail(username)};
   localStorage.setItem(AUTH_KEY,JSON.stringify(currentUser));
   KEY=BASE_KEY+'_'+username;
   db=JSON.parse(localStorage.getItem(KEY)||'null')||blankDb();
   normalizeDb();
   document.getElementById('authScreen').style.display='none';
-  renderUserChip();loadCloudConfigToForm();renderAll();
+  renderUserChip();loadFirebaseConfigToForm();renderAll();
+  setTimeout(()=>syncCloud(false),150);
 }
 function normalizeDb(){
   if(!db||typeof db!=='object')db=blankDb();
@@ -340,23 +451,33 @@ function renderUserChip(){
 }
 function logout(){
   if(!confirm('Keluar dari akun ini?'))return;
+  clearTimeout(cloudSyncTimer);
+  try{if(window.fbAuth)fbAuth.signOut()}catch(e){}
   localStorage.removeItem(AUTH_KEY);currentUser=null;KEY=BASE_KEY;db=blankDb();
   document.getElementById('authScreen').style.display='grid';
   document.getElementById('authUsername').value='';document.getElementById('authPassword').value='';
-  switchAuth('login');renderUserChip();
+  switchAuth('login');renderUserChip();setCloudStatus('☁️ Belum login');
 }
 async function restoreSession(){
-  loadCloudConfigToForm();
+  loadFirebaseConfigToForm();
+  const cfg=firebaseConfig();
+  if(validFirebaseConfig(cfg)){try{initFirebase(cfg)}catch(e){setCloudStatus('☁️ Firebase belum terhubung','err')}}
   const s=localStorage.getItem(AUTH_KEY);
   if(!s){document.getElementById('authScreen').style.display='grid';return}
   try{
     currentUser=JSON.parse(s);
-    if(!currentUser?.username||!currentUser?.access_token)throw 0;
+    if(!currentUser?.username||!currentUser?.uid)throw 0;
     KEY=BASE_KEY+'_'+currentUser.username;
     db=JSON.parse(localStorage.getItem(KEY)||'null')||blankDb();
     normalizeDb();document.getElementById('authScreen').style.display='none';renderUserChip();renderAll();
+    if(firebaseReady){
+      const live=await fbAuth.currentUser;
+      if(live?.uid===currentUser.uid)setTimeout(()=>syncCloud(false),150);
+      else{currentUser=null;localStorage.removeItem(AUTH_KEY);document.getElementById('authScreen').style.display='grid';}
+    }
   }catch(e){localStorage.removeItem(AUTH_KEY);currentUser=null;document.getElementById('authScreen').style.display='grid'}
 }
+function save(){saveLocalOnly();scheduleCloudSync();}
 function defaultRange(){const d=new Date(); const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'); const last=new Date(y,d.getMonth()+1,0).getDate(); return {from:`${y}-${m}-01`,to:`${y}-${m}-${String(last).padStart(2,'0')}`};}
 function rangeKey(from,to){return (from||'')+'__'+(to||'')}
 function getRange(){const a=document.getElementById('stockFrom')?.value,b=document.getElementById('stockTo')?.value; if(a&&b&&a<=b)return {from:a,to:b}; const d=defaultRange(); return d;}
@@ -377,7 +498,7 @@ function stockSummary(b,from,to){const key=rangeKey(from,to),p=ensurePeriod(key,
 let cart=[], pay='Tunai', activeCat='Semua';
 const rupiah=n=>new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n||0);
 const formatQty=n=>Number.isInteger(+n)?String(+n):String(Number(+n).toFixed(2)).replace(/\.?0+$/,'');
-const save=()=>localStorage.setItem(KEY,JSON.stringify(db));
+function save(){saveLocalOnly();scheduleCloudSync();}
 const today=()=>new Date().toISOString().slice(0,10);
 function toast(s){let e=document.getElementById('toast');e.textContent=s;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),1800)}
 function go(page){
@@ -542,15 +663,23 @@ function savePurchase(){
 function openExpenseModal(){openModal('Catat Pengeluaran',`<div class="form-grid"><div class="field"><label>KATEGORI</label><input id="eCat" value="Operasional"></div><div class="field"><label>JUMLAH</label><input id="eAmount" type="number"></div><div class="field full"><label>KETERANGAN</label><input id="eNote" placeholder="Contoh: beli gas"></div></div><button class="btn primary" style="margin-top:15px" onclick="saveExpense()">Simpan</button>`)}
 function saveExpense(){if(!+eAmount.value)return toast('Masukkan jumlah');db.expenses.push({date:today(),cat:eCat.value,note:eNote.value,amount:+eAmount.value});save();closeModal();renderAll();toast('Pengeluaran tersimpan')}
 function deleteExpense(i){if(confirm('Hapus pengeluaran ini?')){db.expenses.splice(i,1);save();renderAll()}}
-function saveSettings(){
+async function saveSettings(){
  const oldLogo=db.settings?.logo||'';
  const file=document.getElementById('shopLogo')?.files?.[0];
- const finish=(logo)=>{
-   db.settings={name:shopName.value,phone:shopPhone.value,address:shopAddress.value,logo:logo||''};
+ try{
+   let logo=oldLogo;
+   if(file){
+     ensureFirebase();
+     const uid=userId();
+     if(!uid)throw new Error('Silakan login terlebih dahulu.');
+     const safeName=file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+     const ref=fbStorage.ref().child(`users/${uid}/logo/${Date.now()}_${safeName}`);
+     await ref.put(file,{contentType:file.type||'image/jpeg'});
+     logo=await ref.getDownloadURL();
+   }
+   db.settings={name:shopName.value,phone:shopPhone.value,address:shopAddress.value,logo};
    save();renderAll();toast('Pengaturan tersimpan');
- };
- if(file){const reader=new FileReader();reader.onload=()=>finish(String(reader.result||''));reader.readAsDataURL(file)}
- else finish(oldLogo);
+ }catch(e){toast('Gagal menyimpan pengaturan: '+(e.message||'periksa Firebase Storage Rules'))}
 }
 function previewLogo(input){
  const file=input?.files?.[0],box=document.getElementById('logoPreview');
@@ -564,7 +693,7 @@ function renderLogoSetting(){
  if(!box)return;
  box.innerHTML=db.settings?.logo?`<img src="${db.settings.logo}" alt="Logo">`:'☕';
 }
-function backup(){let blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='backup-kopikasir-'+today()+'.json';a.click();URL.revokeObjectURL(a.href);toast('Backup dibuat')}
+function backup(){let blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='backup-ekasir-'+today()+'.json';a.click();URL.revokeObjectURL(a.href);toast('Backup dibuat')}
 function restore(file){if(!file)return;let r=new FileReader();r.onload=()=>{try{let x=JSON.parse(r.result);if(!x.menus||!x.transactions)throw 0;db=x;save();renderAll();toast('Data berhasil dipulihkan')}catch(e){toast('File backup tidak valid')}};r.readAsText(file)}
 function exportCSV(){
  const r=getReportRange();
