@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
-<title>e-Kasir - Aplikasi Kasir</title>
+<title>KopiKasir — Warung Kopi</title>
 <style>
 :root{
   --bg:#f4f6f8;--surface:#fff;--surface2:#f8fafc;--text:#172033;--muted:#6b7280;
@@ -29,6 +29,13 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
 @media(max-width:1050px){.cards{grid-template-columns:repeat(2,1fr)}.product-grid{grid-template-columns:repeat(3,1fr)}.grid2,.pos{grid-template-columns:1fr}.cart{position:static}}
 @media(max-width:760px){.sidebar{width:72px;padding:14px 8px}.brand{padding:5px 6px 18px}.brand div:last-child,.nav button span:last-child{display:none}.nav button{justify-content:center;padding:12px}.main{margin-left:72px;width:calc(100% - 72px);padding:16px}.topbar h1{font-size:20px}.cards{grid-template-columns:1fr 1fr}.product-grid{grid-template-columns:1fr 1fr}.form-grid{grid-template-columns:1fr}.full{grid-column:auto}}
 @media(max-width:480px){.cards{grid-template-columns:1fr 1fr;gap:9px}.card{padding:13px}.metric strong{font-size:18px}.product-grid{grid-template-columns:1fr 1fr}.main{padding:12px}.topbar .actions .btn:not(.primary){display:none}}
+
+.recipe-editor{display:grid;gap:10px;margin-top:10px}
+.recipe-row{display:grid;grid-template-columns:1.5fr .8fr auto;gap:8px;align-items:center}
+.recipe-row select,.recipe-row input{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.recipe-cost{background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:10px}
+.recipe-empty{padding:12px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:13px}
+.hint{font-size:12px;color:var(--muted);line-height:1.45}
 </style>
 </head>
 <body>
@@ -80,13 +87,17 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
 <section id="menu" class="page">
  <div class="card"><div class="section-title"><h2>Daftar Menu</h2><button class="btn primary" onclick="openMenuModal()">+ Tambah Menu</button></div>
  <div class="toolbar"><input class="search" id="menuSearch" placeholder="Cari menu..." oninput="renderMenuTable()"></div>
- <div style="overflow:auto"><table class="table"><thead><tr><th>Menu</th><th>Kategori</th><th>Harga Jual</th><th>HPP</th><th>Laba</th><th>Status</th><th></th></tr></thead><tbody id="menuTable"></tbody></table></div></div>
+ <div style="overflow:auto"><table class="table"><thead><tr><th>Menu</th><th>Kategori</th><th>Harga Jual</th><th>HPP Resep</th><th>Margin</th><th>Status</th><th></th></tr></thead><tbody id="menuTable"></tbody></table></div></div>
 </section>
 
 <section id="bahan" class="page">
  <div class="card"><div class="section-title"><h2>Bahan & Stok</h2><button class="btn primary" onclick="openBahanModal()">+ Tambah Bahan</button></div>
  <div style="overflow:auto"><table class="table"><thead><tr><th>Bahan</th><th>Satuan</th><th>Harga/Satuan</th><th>Stok</th><th>Minimum</th><th>Status</th><th></th></tr></thead><tbody id="bahanTable"></tbody></table></div></div>
- <div class="card" style="margin-top:18px"><div class="section-title"><h2>Contoh Resep & HPP</h2><small style="color:var(--muted)">HPP dihitung dari bahan yang dipakai</small></div><div id="recipeInfo"></div></div>
+  <div class="card" style="margin-top:18px">
+    <div class="section-title"><h2>Catatan Stok</h2><small style="color:var(--muted)">Stok berkurang otomatis dari penjualan berdasarkan resep</small></div>
+    <div id="stockInfo"></div>
+  </div>
+ <div class="card" style="margin-top:18px"><div class="section-title"><h2>Contoh Resep & HPP</h2><small style="color:var(--muted)">HPP menu dihitung otomatis dari resep & harga bahan · Riwayat transaksi memakai snapshot HPP</small></div><div id="recipeInfo"></div></div>
 </section>
 
 <section id="pengeluaran" class="page">
@@ -153,10 +164,10 @@ document.getElementById('dateText').textContent=new Intl.DateTimeFormat('id-ID',
 
 function todayTx(){return db.transactions.filter(t=>t.date===today())}
 function metrics(){
- let tx=todayTx(),om=tx.reduce((a,b)=>a+b.total,0),hp=tx.reduce((a,b)=>a+b.hpp,0),ex=db.expenses.filter(x=>x.date===today()).reduce((a,b)=>a+b.amount,0);
+ let tx=todayTx(),om=tx.reduce((a,b)=>a+b.total,0),hp=tx.reduce((a,b)=>a+getTransactionHpp(b),0),ex=db.expenses.filter(x=>x.date===today()).reduce((a,b)=>a+b.amount,0);
  mOmzet.textContent=rupiah(om);mHpp.textContent=rupiah(hp);mLaba.textContent=rupiah(om-hp);mKeluar.textContent=rupiah(ex);
- rOmzet.textContent=rupiah(db.transactions.reduce((a,b)=>a+b.total,0));rHpp.textContent=rupiah(db.transactions.reduce((a,b)=>a+b.hpp,0));
- let totalO=db.transactions.reduce((a,b)=>a+b.total,0),totalH=db.transactions.reduce((a,b)=>a+b.hpp,0),totalE=db.expenses.reduce((a,b)=>a+b.amount,0);
+ rOmzet.textContent=rupiah(db.transactions.reduce((a,b)=>a+b.total,0));rHpp.textContent=rupiah(db.transactions.reduce((a,b)=>a+getTransactionHpp(b),0));
+ let totalO=db.transactions.reduce((a,b)=>a+b.total,0),totalH=db.transactions.reduce((a,b)=>a+getTransactionHpp(b),0),totalE=db.expenses.reduce((a,b)=>a+b.amount,0);
  rLaba.textContent=rupiah(totalO-totalH);rNet.textContent=rupiah(totalO-totalH-totalE);
 }
 function renderRecent(){let x=todayTx().slice(-6).reverse();recent.innerHTML=x.length?x.map(t=>`<div class="cart-item"><div><b>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</b><small style="display:block;color:var(--muted)">${t.time} · ${t.pay}</small></div><b>${rupiah(t.total)}</b></div>`).join(''):'<div class="empty">Belum ada transaksi hari ini.</div>'}
@@ -169,13 +180,134 @@ function renderCart(){let el=document.getElementById('cart');el.innerHTML=cart.l
 function changeQty(id,d){let i=cart.find(x=>x.id===id);i.qty+=d;if(i.qty<=0)cart=cart.filter(x=>x.id!==id);renderCart()}
 function clearCart(){cart=[];renderCart()}
 document.querySelectorAll('.pay button').forEach(b=>b.onclick=()=>{pay=b.dataset.pay;document.querySelectorAll('.pay button').forEach(x=>x.classList.toggle('active',x===b))});
-function checkout(){if(!cart.length)return toast('Keranjang masih kosong');let total=cart.reduce((a,i)=>a+i.price*i.qty,0),hpp=cart.reduce((a,i)=>a+i.hpp*i.qty,0),d=new Date();db.transactions.push({id:db.nextId++,date:today(),time:d.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}),items:cart.map(i=>({...i})),total,hpp,pay});save();toast('Transaksi berhasil disimpan');cart=[];renderCart();metrics();renderRecent()}
-function renderMenuTable(){let q=(menuSearch.value||'').toLowerCase();let a=db.menus.filter(m=>m.name.toLowerCase().includes(q));menuTable.innerHTML=a.map(m=>`<tr><td><b>${m.emoji||'☕'} ${m.name}</b></td><td>${m.cat}</td><td>${rupiah(m.price)}</td><td>${rupiah(m.hpp)}</td><td><b>${rupiah(m.price-m.hpp)}</b></td><td><span class="badge ${m.active?'ok':''}">${m.active?'Aktif':'Nonaktif'}</span></td><td><button class="btn" onclick="editMenu(${m.id})">Edit</button></td></tr>`).join('')}
-function renderBahan(){bahanTable.innerHTML=db.bahan.map(b=>`<tr><td><b>${b.name}</b></td><td>${b.unit}</td><td>${rupiah(b.cost)}</td><td>${b.stock}</td><td>${b.min}</td><td><span class="badge ${b.stock>b.min?'ok':'warn'}">${b.stock>b.min?'Aman':'Menipis'}</span></td><td><button class="btn" onclick="editBahan(${b.id})">Edit</button></td></tr>`).join('');recipeInfo.innerHTML=db.recipes.length?db.recipes.map(r=>{let m=db.menus.find(x=>x.id===r.menuId);let cost=r.items.reduce((s,[n,q])=>s+(db.bahan.find(b=>b.name===n)?.cost||0)*q,0);return `<div class="cart-item"><div><b>${m?.name||'Menu'}</b><small style="display:block;color:var(--muted)">${r.items.map(x=>x[0]+' '+x[1]).join(' · ')}</small></div><b>${rupiah(cost)}</b></div>`}).join(''):'<div class="empty">Belum ada resep.</div>'}
-function renderExpenses(){expenseTable.innerHTML=db.expenses.slice().reverse().map((e,i)=>`<tr><td>${e.date}</td><td>${e.cat}</td><td>${e.note}</td><td><b>${rupiah(e.amount)}</b></td><td><button class="btn" onclick="deleteExpense(${db.expenses.length-1-i})">Hapus</button></td></tr>`).join('')||'<tr><td colspan="5"><div class="empty">Belum ada pengeluaran.</div></td></tr>'}
-function renderReport(){reportTable.innerHTML=db.transactions.slice().reverse().map(t=>`<tr><td>${t.date} ${t.time}</td><td>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</td><td>${t.pay}</td><td>${rupiah(t.total)}</td><td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td></tr>`).join('')||'<tr><td colspan="6"><div class="empty">Belum ada transaksi.</div></td></tr>'}
-function openModal(title,body){modalTitle.textContent=title;modalBody.innerHTML=body;modal.classList.add('show')}function closeModal(){modal.classList.remove('show')}
-function openMenuModal(id=null){let m=id?db.menus.find(x=>x.id===id):{name:'',cat:'Kopi',price:'',hpp:'',emoji:'☕',active:true};openModal(id?'Edit Menu':'Tambah Menu',`<div class="form-grid"><div class="field"><label>NAMA MENU</label><input id="fName" value="${m.name}"></div><div class="field"><label>KATEGORI</label><input id="fCat" value="${m.cat}"></div><div class="field"><label>HARGA JUAL</label><input id="fPrice" type="number" value="${m.price}"></div><div class="field"><label>HPP / PORSI</label><input id="fHpp" type="number" value="${m.hpp}"></div><div class="field"><label>IKON</label><input id="fEmoji" value="${m.emoji||'☕'}"></div></div><button class="btn primary" style="margin-top:15px" onclick="saveMenu(${id||0})">Simpan</button>`)}
+function checkout(){
+  if(!cart.length)return toast('Keranjang masih kosong');
+
+  // Hitung kebutuhan bahan berdasarkan resep SAAT transaksi dilakukan.
+  const stockNeed={};
+  const itemSnapshots=[];
+  for(const i of cart){
+    const menu=db.menus.find(m=>m.id===i.id);
+    const rec=recipeForMenu(i.id).items||[];
+    if(!menu)return toast('Menu tidak ditemukan');
+
+    const recipeSnapshot=rec.map(([name,qty])=>{
+      const b=db.bahan.find(x=>x.name===name);
+      return {
+        name,
+        qty:+qty||0,
+        unit:b?.unit||'',
+        costPerUnit:+(b?.cost||0),
+        subtotal:(+(b?.cost||0))*(+qty||0)
+      };
+    });
+
+    recipeSnapshot.forEach(r=>{
+      stockNeed[r.name]=(stockNeed[r.name]||0)+(r.qty*i.qty);
+    });
+
+    const itemHpp=recipeSnapshot.reduce((s,r)=>s+r.subtotal,0);
+
+    // SNAPSHOT: semua data penting transaksi disalin sekarang.
+    itemSnapshots.push({
+      id:i.id,
+      name:menu.name,
+      cat:menu.cat,
+      qty:i.qty,
+      price:+menu.price||0,
+      hpp:itemHpp,
+      recipe:recipeSnapshot
+    });
+  }
+
+  // Validasi stok sebelum menyimpan transaksi.
+  for(const name in stockNeed){
+    const b=db.bahan.find(x=>x.name===name);
+    if(!b)return toast(`Bahan ${name} tidak ditemukan`);
+    if((+b.stock||0)<stockNeed[name]){
+      return toast(`Stok ${name} tidak cukup`);
+    }
+  }
+
+  const total=itemSnapshots.reduce((s,i)=>s+i.price*i.qty,0);
+  const hpp=itemSnapshots.reduce((s,i)=>s+i.hpp*i.qty,0);
+  const d=new Date();
+
+  db.transactions.push({
+    id:db.nextId++,
+    date:today(),
+    time:d.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}),
+    items:itemSnapshots,
+    total,
+    hpp,
+    pay,
+    // Snapshot ringkas untuk menjaga histori tetap konsisten.
+    snapshotVersion:1
+  });
+
+  // Kurangi stok berdasarkan snapshot resep transaksi.
+  for(const name in stockNeed){
+    const b=db.bahan.find(x=>x.name===name);
+    b.stock=(+b.stock||0)-stockNeed[name];
+  }
+
+  save();
+  toast('Transaksi berhasil disimpan & histori HPP diamankan');
+  cart=[];
+  renderCart();
+  renderAll();
+}
+function recipeRowsHtml(items=[]){
+  if(!items.length) return '<div class="recipe-empty" id="recipeEmpty">Belum ada bahan. Klik <b>+ Bahan</b> untuk membuat resep.</div>';
+  return items.map((it,i)=>`<div class="recipe-row">
+    <select class="rName">${db.bahan.map(b=>`<option value="${String(b.name).replace(/"/g,'&quot;')}" ${b.name===it[0]?'selected':''}>${b.name} (${b.unit})</option>`).join('')}</select>
+    <input class="rQty" type="number" min="0" step="any" value="${it[1]}">
+    <button class="btn" type="button" onclick="this.parentElement.remove();updateRecipeCost()">✕</button>
+  </div>`).join('');
+}
+function addRecipeRow(){
+  const wrap=document.getElementById('recipeRows');
+  if(!wrap)return;
+  const empty=document.getElementById('recipeEmpty'); if(empty) empty.remove();
+  const div=document.createElement('div'); div.className='recipe-row';
+  div.innerHTML=`<select class="rName">${db.bahan.map(b=>`<option value="${String(b.name).replace(/"/g,'&quot;')}">${b.name} (${b.unit})</option>`).join('')}</select>
+  <input class="rQty" type="number" min="0" step="any" value="1">
+  <button class="btn" type="button" onclick="this.parentElement.remove();updateRecipeCost()">✕</button>`;
+  wrap.appendChild(div); updateRecipeCost();
+}
+function getRecipeFromForm(){
+  return [...document.querySelectorAll('#recipeRows .recipe-row')].map(row=>{
+    const n=row.querySelector('.rName')?.value, q=+(row.querySelector('.rQty')?.value||0);
+    return [n,q];
+  }).filter(x=>x[0]&&x[1]>0);
+}
+function updateRecipeCost(){
+  const items=getRecipeFromForm(), cost=calcRecipeCost(items);
+  const e=document.getElementById('recipeCost'); if(e)e.textContent=rupiah(cost);
+  const h=document.getElementById('fHpp'); if(h){h.value=cost; h.readOnly=true;}
+  const p=+(document.getElementById('fPrice')?.value||0);
+  const m=document.getElementById('marginInfo'); if(m)m.textContent=p>0?`Margin kotor: ${rupiah(p-cost)} (${((p-cost)/p*100).toFixed(1)}%)`:'Masukkan harga jual untuk melihat margin';
+}
+function openMenuModal(id=null){
+  let m=id?db.menus.find(x=>x.id===id):{name:'',cat:'Kopi',price:'',hpp:0,emoji:'☕',active:true};
+  const rec=id?recipeForMenu(id):{items:[]};
+  openModal(id?'Edit Menu':'Tambah Menu',`
+    <div class="form-grid">
+      <div class="field"><label>NAMA MENU</label><input id="fName" value="${m.name}"></div>
+      <div class="field"><label>KATEGORI</label><input id="fCat" value="${m.cat}"></div>
+      <div class="field"><label>HARGA JUAL</label><input id="fPrice" type="number" min="0" value="${m.price}" oninput="updateRecipeCost()"></div>
+      <div class="field"><label>HPP / PORSI (OTOMATIS)</label><input id="fHpp" type="number" value="${m.hpp}" readonly></div>
+      <div class="field"><label>IKON</label><input id="fEmoji" value="${m.emoji||'☕'}"></div>
+      <div class="field full"><label>RESEP / BAHAN PER PORSI</label>
+        <div class="hint">Pilih bahan dan jumlah pemakaian per 1 porsi. HPP dihitung otomatis dari harga satuan bahan.</div>
+        <div id="recipeRows" class="recipe-editor">${recipeRowsHtml(rec.items)}</div>
+        <button class="btn" type="button" style="margin-top:8px" onclick="addRecipeRow()">+ Bahan</button>
+        <div class="recipe-cost"><b>HPP resep: <span id="recipeCost">${rupiah(calcRecipeCost(rec.items))}</span></b><div class="hint" id="marginInfo"></div></div>
+      </div>
+    </div>
+    <button class="btn primary" style="margin-top:15px" onclick="saveMenu(${id||0})">Simpan Menu</button>`);
+  updateRecipeCost();
+}
 function editMenu(id){openMenuModal(id)}
 function saveMenu(id){let x={id:id||db.nextId++,name:fName.value,cat:fCat.value||'Lainnya',price:+fPrice.value||0,hpp:+fHpp.value||0,emoji:fEmoji.value||'☕',active:true};if(id)db.menus=db.menus.map(m=>m.id===id?x:m);else db.menus.push(x);save();closeModal();renderAll();toast('Menu tersimpan')}
 function openBahanModal(id=null){let b=id?db.bahan.find(x=>x.id===id):{name:'',unit:'gram',cost:'',stock:'',min:''};openModal(id?'Edit Bahan':'Tambah Bahan',`<div class="form-grid"><div class="field"><label>NAMA BAHAN</label><input id="bName" value="${b.name}"></div><div class="field"><label>SATUAN</label><input id="bUnit" value="${b.unit}"></div><div class="field"><label>HARGA / SATUAN</label><input id="bCost" type="number" value="${b.cost}"></div><div class="field"><label>STOK</label><input id="bStock" type="number" value="${b.stock}"></div><div class="field"><label>MINIMUM STOK</label><input id="bMin" type="number" value="${b.min}"></div></div><button class="btn primary" style="margin-top:15px" onclick="saveBahan(${id||0})">Simpan</button>`)}
@@ -188,7 +320,28 @@ function saveSettings(){db.settings={name:shopName.value,phone:shopPhone.value,a
 function backup(){let blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='backup-kopikasir-'+today()+'.json';a.click();URL.revokeObjectURL(a.href);toast('Backup dibuat')}
 function restore(file){if(!file)return;let r=new FileReader();r.onload=()=>{try{let x=JSON.parse(r.result);if(!x.menus||!x.transactions)throw 0;db=x;save();renderAll();toast('Data berhasil dipulihkan')}catch(e){toast('File backup tidak valid')}};r.readAsText(file)}
 function exportCSV(){let rows=[['Tanggal','Waktu','Item','Pembayaran','Omzet','HPP','Laba'],...db.transactions.map(t=>[t.date,t.time,t.items.map(i=>i.name+' x'+i.qty).join(' | '),t.pay,t.total,t.hpp,t.total-t.hpp])];let csv=rows.map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(',')).join('\n');let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='laporan-kopikasir.csv';a.click()}
-function renderAll(){metrics();renderRecent();renderLow();renderCats();renderProducts();renderCart();renderMenuTable();renderBahan();renderExpenses();renderReport();shopName.value=db.settings.name;shopPhone.value=db.settings.phone;shopAddress.value=db.settings.address}
+function renderStockInfo(){
+  const el=document.getElementById('stockInfo'); if(!el)return;
+  const used={};
+  db.transactions.forEach(t=>t.items.forEach(i=>{
+    const rec=recipeForMenu(i.id).items||[];
+    rec.forEach(([name,q])=>used[name]=(used[name]||0)+q*i.qty);
+  }));
+  const rows=db.bahan.map(b=>`<div class="cart-item"><div><b>${b.name}</b><small style="display:block;color:var(--muted)">Stok sekarang: ${b.stock} ${b.unit} · Terpakai tercatat: ${used[b.name]||0} ${b.unit}</small></div><span class="badge ${b.stock>b.min?'ok':'warn'}">${b.stock>b.min?'Aman':'Menipis'}</span></div>`).join('');
+  el.innerHTML=rows||'<div class="empty">Belum ada bahan.</div>';
+}
+function getTransactionHpp(t){
+  // Transaksi lama memakai snapshot HPP yang tersimpan.
+  // Tidak pernah mengambil ulang harga bahan saat ini.
+  return +(t.hpp||0);
+}
+function transactionSnapshotText(t){
+  return (t.items||[]).map(i=>{
+    const h=+(i.hpp||0);
+    return `${i.name} ×${i.qty} — HPP ${rupiah(h)}`;
+  }).join(' | ');
+}
+function renderAll(){metrics();renderRecent();renderLow();renderCats();renderProducts();renderCart();renderMenuTable();renderBahan();renderStockInfo();renderExpenses();renderReport();shopName.value=db.settings.name;shopPhone.value=db.settings.phone;shopAddress.value=db.settings.address}
 renderAll();
 </script>
 </body>
