@@ -85,17 +85,21 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
 </section>
 
 <section id="menu" class="page">
- <div class="card"><div class="section-title"><h2>Daftar Menu</h2><button class="btn primary" onclick="openMenuModal()">+ Tambah Menu</button></div>
+ <div class="card"><div class="section-title"><h2>Daftar Menu</h2><div class="actions"><button class="btn" onclick="deleteAllMenus()">Hapus Semua</button><button class="btn primary" onclick="openMenuModal()">+ Tambah Menu</button></div></div>
  <div class="toolbar"><input class="search" id="menuSearch" placeholder="Cari menu..." oninput="renderMenuTable()"></div>
  <div style="overflow:auto"><table class="table"><thead><tr><th>Menu</th><th>Kategori</th><th>Harga Jual</th><th>HPP Resep</th><th>Margin</th><th>Status</th><th></th></tr></thead><tbody id="menuTable"></tbody></table></div></div>
 </section>
 
 <section id="bahan" class="page">
- <div class="card"><div class="section-title"><h2>Bahan & Stok</h2><button class="btn primary" onclick="openBahanModal()">+ Tambah Bahan</button></div>
+ <div class="card"><div class="section-title"><h2>Bahan & Stok</h2><div class="actions"><button class="btn" onclick="openStockModal()">＋ Tambah Stok</button><button class="btn primary" onclick="openBahanModal()">+ Tambah Bahan</button></div></div>
  <div style="overflow:auto"><table class="table"><thead><tr><th>Bahan</th><th>Satuan</th><th>Harga/Satuan</th><th>Stok</th><th>Minimum</th><th>Status</th><th></th></tr></thead><tbody id="bahanTable"></tbody></table></div></div>
   <div class="card" style="margin-top:18px">
     <div class="section-title"><h2>Catatan Stok</h2><small style="color:var(--muted)">Stok berkurang otomatis dari penjualan berdasarkan resep</small></div>
     <div id="stockInfo"></div>
+  </div>
+  <div class="card" style="margin-top:18px">
+    <div class="section-title"><h2>Riwayat Tambah Stok</h2></div>
+    <div style="overflow:auto"><table class="table"><thead><tr><th>Tanggal</th><th>Bahan</th><th>Qty</th><th>Harga/Satuan</th><th>Total</th><th>Keterangan</th></tr></thead><tbody id="stockMoveTable"></tbody></table></div>
   </div>
  <div class="card" style="margin-top:18px"><div class="section-title"><h2>Contoh Resep & HPP</h2><small style="color:var(--muted)">HPP menu dihitung otomatis dari resep & harga bahan · Riwayat transaksi memakai snapshot HPP</small></div><div id="recipeInfo"></div></div>
 </section>
@@ -127,27 +131,27 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
 const KEY='kopikasir_v1';
 let db=JSON.parse(localStorage.getItem(KEY)||'null')||{
   settings:{name:'KopiKasir Coffee',phone:'',address:''},
-  menus:[
-   {id:1,name:'Es Kopi Susu',cat:'Kopi',price:15000,hpp:5000,active:true,emoji:'🥤'},
-   {id:2,name:'Americano',cat:'Kopi',price:12000,hpp:3500,active:true,emoji:'☕'},
-   {id:3,name:'Cappuccino',cat:'Kopi',price:18000,hpp:6500,active:true,emoji:'☕'},
-   {id:4,name:'Matcha Latte',cat:'Non-Kopi',price:17000,hpp:7000,active:true,emoji:'🍵'},
-   {id:5,name:'Teh Manis',cat:'Non-Kopi',price:7000,hpp:1500,active:true,emoji:'🫖'},
-   {id:6,name:'Kentang Goreng',cat:'Makanan',price:15000,hpp:6500,active:true,emoji:'🍟'}
-  ],
-  bahan:[
-   {id:1,name:'Biji Kopi',unit:'gram',cost:100,stock:1000,min:200},
-   {id:2,name:'Susu UHT',unit:'ml',cost:15,stock:3000,min:500},
-   {id:3,name:'Gula',unit:'gram',cost:20,stock:1000,min:200},
-   {id:4,name:'Cup 16 oz',unit:'pcs',cost:500,stock:80,min:20},
-   {id:5,name:'Bubuk Matcha',unit:'gram',cost:300,stock:250,min:50}
-  ],
-  recipes:[
-   {menuId:1,items:[['Biji Kopi',18],['Susu UHT',100],['Gula',20],['Cup 16 oz',1]]},
-   {menuId:4,items:[['Bubuk Matcha',8],['Susu UHT',100],['Gula',15],['Cup 16 oz',1]]}
-  ],
+  menus:[],
+  bahan:[],
+  recipes:[],
+  stockMoves:[],
   transactions:[], expenses:[], nextId:20
 };
+if(!Array.isArray(db.stockMoves))db.stockMoves=[];
+
+// Remove only the original demo menu/recipe records from an existing installation.
+// User-created menus are preserved.
+(function removeOriginalDemoMenus(){
+  const demoNames=['Es Kopi Susu','Americano','Cappuccino','Matcha Latte','Teh Manis','Kentang Goreng'];
+  const demoIds=new Set([1,2,3,4,5,6]);
+  const hasOnlyDemo=db.menus.length>0 && db.menus.every(m=>demoNames.includes(m.name)&&demoIds.has(m.id));
+  if(hasOnlyDemo){
+    db.menus=[];
+    db.recipes=[];
+    save();
+  }
+})();
+
 let cart=[], pay='Tunai', activeCat='Semua';
 const rupiah=n=>new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n||0);
 const save=()=>localStorage.setItem(KEY,JSON.stringify(db));
@@ -174,7 +178,7 @@ function renderRecent(){let x=todayTx().slice(-6).reverse();recent.innerHTML=x.l
 function renderLow(){let x=db.bahan.filter(b=>b.stock<=b.min);lowStock.innerHTML=x.length?x.map(b=>`<div class="cart-item"><div><b>${b.name}</b><small style="display:block;color:var(--muted)">${b.stock} ${b.unit} tersisa</small></div><span class="badge warn">Menipis</span></div>`).join(''):'<div class="empty">Semua stok aman ✓</div>'}
 
 function renderCats(){let cats=['Semua',...new Set(db.menus.map(m=>m.cat))];catsEl= document.getElementById('cats');catsEl.innerHTML=cats.map(c=>`<button class="cat ${c===activeCat?'active':''}" onclick="activeCat='${c}';renderProducts();renderCats()">${c}</button>`).join('')}
-function renderProducts(){let q=(document.getElementById('posSearch')?.value||'').toLowerCase();let a=db.menus.filter(m=>m.active&&(activeCat==='Semua'||m.cat===activeCat)&&m.name.toLowerCase().includes(q));products.innerHTML=a.map(m=>`<div class="product" onclick="addCart(${m.id})"><div class="emoji">${m.emoji||'☕'}</div><h3>${m.name}</h3><p>${m.cat}</p><div class="row"><span class="price">${rupiah(m.price)}</span><button class="mini">Tambah</button></div></div>`).join('')||'<div class="empty" style="grid-column:1/-1">Menu tidak ditemukan.</div>'}
+function renderProducts(){let q=(document.getElementById('posSearch')?.value||'').toLowerCase();let a=db.menus.filter(m=>m.active&&(activeCat==='Semua'||m.cat===activeCat)&&m.name.toLowerCase().includes(q));products.innerHTML=a.map(m=>`<div class="product" role="button" tabindex="0" onclick="addCart(${m.id})" onkeydown="if(event.key==='Enter'||event.key===' ')addCart(${m.id})"><div class="emoji">${m.emoji||'☕'}</div><h3>${m.name}</h3><p>${m.cat}</p><div class="row"><span class="price">${rupiah(m.price)}</span><button class="mini" type="button" onclick="event.stopPropagation();addCart(${m.id})">Tambah</button></div></div>`).join('')||'<div class="empty" style="grid-column:1/-1">Menu tidak ditemukan.</div>'}
 function addCart(id){let m=db.menus.find(x=>x.id===id),i=cart.find(x=>x.id===id);if(i)i.qty++;else cart.push({id,qty:1,name:m.name,price:m.price,hpp:m.hpp});renderCart()}
 function renderCart(){let el=document.getElementById('cart');el.innerHTML=cart.length?cart.map(i=>`<div class="cart-item"><div><b>${i.name}</b><small style="display:block;color:var(--muted)">${rupiah(i.price)} × ${i.qty}</small></div><div class="qty"><button onclick="changeQty(${i.id},-1)">−</button><b>${i.qty}</b><button onclick="changeQty(${i.id},1)">+</button></div></div>`).join(''):'<div class="empty">Keranjang masih kosong.<br>Pilih menu untuk mulai.</div>';let sub=cart.reduce((a,i)=>a+i.price*i.qty,0);subtotal.textContent=rupiah(sub);discount.textContent=rupiah(0);total.textContent=rupiah(sub)}
 function changeQty(id,d){let i=cart.find(x=>x.id===id);i.qty+=d;if(i.qty<=0)cart=cart.filter(x=>x.id!==id);renderCart()}
@@ -309,10 +313,76 @@ function openMenuModal(id=null){
   updateRecipeCost();
 }
 function editMenu(id){openMenuModal(id)}
+function deleteMenu(id){
+  const m=db.menus.find(x=>x.id===id);
+  if(!m)return;
+  if(!confirm(`Hapus menu "${m.name}"?`))return;
+  db.menus=db.menus.filter(x=>x.id!==id);
+  db.recipes=db.recipes.filter(x=>x.menuId!==id);
+  cart=cart.filter(x=>x.id!==id);
+  save();renderAll();toast('Menu dihapus');
+}
+function deleteAllMenus(){
+  if(!db.menus.length)return toast('Belum ada menu');
+  if(!confirm('Hapus SEMUA menu dan resep? Data transaksi lama tetap aman.'))return;
+  db.menus=[];db.recipes=[];cart=[];save();renderAll();toast('Semua menu dihapus');
+}
 function saveMenu(id){let x={id:id||db.nextId++,name:fName.value,cat:fCat.value||'Lainnya',price:+fPrice.value||0,hpp:+fHpp.value||0,emoji:fEmoji.value||'☕',active:true};if(id)db.menus=db.menus.map(m=>m.id===id?x:m);else db.menus.push(x);save();closeModal();renderAll();toast('Menu tersimpan')}
 function openBahanModal(id=null){let b=id?db.bahan.find(x=>x.id===id):{name:'',unit:'gram',cost:'',stock:'',min:''};openModal(id?'Edit Bahan':'Tambah Bahan',`<div class="form-grid"><div class="field"><label>NAMA BAHAN</label><input id="bName" value="${b.name}"></div><div class="field"><label>SATUAN</label><input id="bUnit" value="${b.unit}"></div><div class="field"><label>HARGA / SATUAN</label><input id="bCost" type="number" value="${b.cost}"></div><div class="field"><label>STOK</label><input id="bStock" type="number" value="${b.stock}"></div><div class="field"><label>MINIMUM STOK</label><input id="bMin" type="number" value="${b.min}"></div></div><button class="btn primary" style="margin-top:15px" onclick="saveBahan(${id||0})">Simpan</button>`)}
 function editBahan(id){openBahanModal(id)}
 function saveBahan(id){let x={id:id||db.nextId++,name:bName.value,unit:bUnit.value||'pcs',cost:+bCost.value||0,stock:+bStock.value||0,min:+bMin.value||0};if(id)db.bahan=db.bahan.map(b=>b.id===id?x:b);else db.bahan.push(x);save();closeModal();renderAll();toast('Bahan tersimpan')}
+function openStockModal(){
+  if(!db.bahan.length){
+    return toast('Tambahkan bahan terlebih dahulu');
+  }
+  const options=db.bahan.map(b=>`<option value="${b.id}">${b.name} (${b.unit})</option>`).join('');
+  openModal('Tambah Stok',`
+    <div class="form-grid">
+      <div class="field"><label>BAHAN</label><select id="sBahan">${options}</select></div>
+      <div class="field"><label>JUMLAH STOK MASUK</label><input id="sQty" type="number" min="0" step="any" placeholder="0"></div>
+      <div class="field"><label>HARGA BELI / SATUAN</label><input id="sCost" type="number" min="0" step="any" placeholder="Opsional"></div>
+      <div class="field full"><label>KETERANGAN</label><input id="sNote" placeholder="Contoh: pembelian dari supplier"></div>
+    </div>
+    <div class="hint" style="margin-top:10px">Harga beli yang dimasukkan akan menjadi harga bahan terbaru dan digunakan untuk menghitung HPP menu berikutnya. HPP transaksi lama tetap aman.</div>
+    <button class="btn primary" style="margin-top:15px" onclick="saveStock()">Simpan Stok</button>`);
+}
+function openStockModalFor(id){
+  openStockModal();
+  setTimeout(()=>{if(document.getElementById('sBahan'))document.getElementById('sBahan').value=String(id)},0);
+}
+function saveStock(){
+  const b=db.bahan.find(x=>x.id===+sBahan.value);
+  const qty=+(sQty.value||0);
+  if(!b)return toast('Bahan tidak ditemukan');
+  if(qty<=0)return toast('Jumlah stok harus lebih dari 0');
+  const oldCost=+b.cost||0;
+  const newCost=sCost.value===''?oldCost:+sCost.value;
+  if(newCost<0)return toast('Harga beli tidak valid');
+  b.stock=(+b.stock||0)+qty;
+  b.cost=newCost;
+  if(!Array.isArray(db.stockMoves))db.stockMoves=[];
+  db.stockMoves.push({
+    id:db.nextId++,
+    date:today(),
+    bahanId:b.id,
+    bahan:b.name,
+    unit:b.unit,
+    qty,
+    cost:newCost,
+    total:qty*newCost,
+    note:sNote.value||'Tambah stok'
+  });
+  save();closeModal();renderAll();toast('Stok berhasil ditambahkan');
+}
+function renderStockMoves(){
+  const el=document.getElementById('stockMoveTable'); if(!el)return;
+  const moves=Array.isArray(db.stockMoves)?db.stockMoves.slice().reverse():[];
+  el.innerHTML=moves.map(x=>`<tr>
+    <td>${x.date}</td><td><b>${x.bahan}</b></td><td>${x.qty} ${x.unit||''}</td>
+    <td>${rupiah(x.cost)}</td><td>${rupiah(x.total)}</td><td>${x.note||'-'}</td>
+  </tr>`).join('')||'<tr><td colspan="6"><div class="empty">Belum ada penambahan stok.</div></td></tr>';
+}
+
 function openExpenseModal(){openModal('Catat Pengeluaran',`<div class="form-grid"><div class="field"><label>KATEGORI</label><input id="eCat" value="Operasional"></div><div class="field"><label>JUMLAH</label><input id="eAmount" type="number"></div><div class="field full"><label>KETERANGAN</label><input id="eNote" placeholder="Contoh: beli gas"></div></div><button class="btn primary" style="margin-top:15px" onclick="saveExpense()">Simpan</button>`)}
 function saveExpense(){if(!+eAmount.value)return toast('Masukkan jumlah');db.expenses.push({date:today(),cat:eCat.value,note:eNote.value,amount:+eAmount.value});save();closeModal();renderAll();toast('Pengeluaran tersimpan')}
 function deleteExpense(i){if(confirm('Hapus pengeluaran ini?')){db.expenses.splice(i,1);save();renderAll()}}
@@ -341,7 +411,7 @@ function transactionSnapshotText(t){
     return `${i.name} ×${i.qty} — HPP ${rupiah(h)}`;
   }).join(' | ');
 }
-function renderAll(){metrics();renderRecent();renderLow();renderCats();renderProducts();renderCart();renderMenuTable();renderBahan();renderStockInfo();renderExpenses();renderReport();shopName.value=db.settings.name;shopPhone.value=db.settings.phone;shopAddress.value=db.settings.address}
+function renderAll(){metrics();renderRecent();renderLow();renderCats();renderProducts();renderCart();renderMenuTable();renderBahan();renderStockInfo();renderStockMoves();renderExpenses();renderReport();shopName.value=db.settings.name;shopPhone.value=db.settings.phone;shopAddress.value=db.settings.address}
 renderAll();
 </script>
 </body>
