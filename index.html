@@ -57,9 +57,40 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
  tr{page-break-inside:avoid}
 }
 
+
+/* ===== LOGIN USERNAME + PASSWORD ===== */
+.auth-screen{position:fixed;inset:0;z-index:100;background:linear-gradient(135deg,#111827 0%,#2b2118 100%);display:grid;place-items:center;padding:20px}
+.auth-card{width:min(430px,100%);background:#fff;border-radius:24px;padding:28px;box-shadow:0 25px 80px rgba(0,0,0,.28)}
+.auth-brand{display:flex;align-items:center;gap:12px;margin-bottom:22px}.auth-brand-icon{width:50px;height:50px;border-radius:15px;background:#a66a37;color:#fff;display:grid;place-items:center;font-size:25px}
+.auth-card h2{margin:0 0 6px;font-size:24px}.auth-card .sub{margin:0 0 22px;color:var(--muted);font-size:13px}
+.auth-tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:#f3f4f6;padding:5px;border-radius:12px;margin-bottom:18px}.auth-tabs button{padding:10px;border-radius:9px;background:transparent;color:var(--muted);font-weight:700}.auth-tabs button.active{background:#fff;color:var(--text);box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.auth-form{display:grid;gap:12px}.auth-form label{font-size:12px;color:var(--muted);font-weight:700}.auth-form input{width:100%;padding:12px 13px;border:1px solid var(--line);border-radius:11px;outline:none}
+.auth-msg{display:none;margin-top:12px;padding:10px 12px;border-radius:10px;font-size:12px}.auth-msg.show{display:block}.auth-msg.err{background:#fee2e2;color:#991b1b}.auth-msg.ok{background:#dcfce7;color:#166534}
+.auth-foot{margin-top:18px;text-align:center;color:var(--muted);font-size:11px;line-height:1.5}
+.user-chip{display:flex;align-items:center;gap:8px}.user-avatar{width:34px;height:34px;border-radius:10px;background:#f1e6da;display:grid;place-items:center}
+.settings-auth{margin-top:18px}.settings-auth .hint{font-size:12px;color:var(--muted);line-height:1.5}
+@media(max-width:480px){.auth-card{padding:22px;border-radius:20px}}
+
 </style>
 </head>
 <body>
+
+<div id="authScreen" class="auth-screen">
+  <div class="auth-card">
+    <div class="auth-brand"><div class="auth-brand-icon">☕</div><div><b style="font-size:18px">e-Kasir</b><div style="font-size:12px;color:var(--muted)">Penjualan & Stok</div></div></div>
+    <h2 id="authTitle">Masuk</h2>
+    <p class="sub" id="authSubtitle">Masuk menggunakan username dan password Anda.</p>
+    <div class="auth-tabs"><button id="tabLogin" class="active" onclick="switchAuth('login')">Masuk</button><button id="tabRegister" onclick="switchAuth('register')">Daftar</button></div>
+    <form id="authForm" class="auth-form" onsubmit="submitAuth(event)">
+      <div class="field"><label>USERNAME</label><input id="authUsername" autocomplete="username" minlength="3" maxlength="30" placeholder="Contoh: kasir01" required></div>
+      <div class="field"><label>PASSWORD</label><input id="authPassword" type="password" autocomplete="current-password" minlength="6" placeholder="Minimal 6 karakter" required></div>
+      <div id="authConfirmWrap" class="field" style="display:none"><label>KONFIRMASI PASSWORD</label><input id="authPassword2" type="password" autocomplete="new-password" minlength="6" placeholder="Ulangi password"></div>
+      <button id="authSubmit" class="btn primary" style="width:100%" type="submit">Masuk</button>
+    </form>
+    <div id="authMsg" class="auth-msg"></div>
+    <div class="auth-foot">Akun dan password dikelola oleh cloud.<br>Data tiap username dibuat terpisah.</div>
+  </div>
+</div>
 <div class="app">
 <aside class="sidebar">
   <div class="brand"><div class="brand-icon">☕</div><div><b>e-Kasir</b><small>Aplikasi Penjualan</small></div></div>
@@ -75,7 +106,7 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
 </aside>
 
 <main class="main">
-<section class="topbar"><div><h1 id="pageTitle">Dashboard</h1><p id="dateText"></p></div><div class="actions"><button class="btn" onclick="backup()">💾 Backup</button><button class="btn primary" onclick="go('kasir')">+ Transaksi</button></div></section>
+<section class="topbar"><div><h1 id="pageTitle">Dashboard</h1><p id="dateText"></p></div><div class="actions"><div id="userChip" class="user-chip"></div><button class="btn" onclick="backup()">💾 Backup</button><button class="btn primary" onclick="go('kasir')">+ Transaksi</button></div></section>
 
 <section id="dashboard" class="page active">
  <div class="cards">
@@ -183,7 +214,19 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
   </div>
   <button class="btn primary" style="margin-top:15px" onclick="saveSettings()">Simpan Pengaturan</button>
  </div>
- <div class="card" style="margin-top:18px"><div class="section-title"><h2>Data</h2></div><p style="color:var(--muted);font-size:13px">Data aplikasi tersimpan di perangkat. Gunakan Backup secara berkala agar mudah dipindahkan atau dipulihkan.</p><button class="btn" onclick="backup()">💾 Backup JSON</button> <label class="btn">📥 Restore JSON<input type="file" accept=".json" hidden onchange="restore(this.files[0])"></label></div>
+ 
+ <div class="card settings-auth">
+  <div class="section-title"><h2>Akun & Cloud</h2></div>
+  <div class="hint">Login memakai username + password. Password tidak disimpan di HTML atau localStorage. Masukkan Project URL dan anon/public key cloud Anda.</div>
+  <div class="form-grid" style="margin-top:12px">
+   <div class="field"><label>PROJECT URL</label><input id="cloudUrl" placeholder="https://xxxxx.supabase.co"></div>
+   <div class="field"><label>ANON / PUBLIC KEY</label><input id="cloudAnonKey" type="password" placeholder="Masukkan anon/public key"></div>
+  </div>
+  <button class="btn primary" style="margin-top:12px" onclick="saveCloudConfig()">Simpan Konfigurasi Cloud</button>
+  <button class="btn danger" style="margin-top:10px" onclick="logout()">Keluar dari Akun</button>
+ </div>
+
+<div class="card" style="margin-top:18px"><div class="section-title"><h2>Data</h2></div><p style="color:var(--muted);font-size:13px">Data aplikasi dipisahkan berdasarkan username pada perangkat. Login menggunakan akun cloud; sinkronisasi database cloud akan menjadi tahap berikutnya.</p><button class="btn" onclick="backup()">💾 Backup JSON</button> <label class="btn">📥 Restore JSON<input type="file" accept=".json" hidden onchange="restore(this.files[0])"></label></div>
 </section>
 </main>
 </div>
@@ -192,39 +235,128 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
 <div class="toast" id="toast"></div>
 
 <script>
-const KEY='kopikasir_v3';
-let db=JSON.parse(localStorage.getItem(KEY)||'null')||{
+const BASE_KEY='kopikasir_v4';
+const AUTH_KEY='ekasir_auth_session';
+const CLOUD_KEY='ekasir_cloud_config';
+let currentUser=null;
+let KEY=BASE_KEY;
+let db={};
+
+function blankDb(){return {
   settings:{name:'KopiKasir Coffee',phone:'',address:'',logo:''},
-  menus:[],
-  bahan:[],
-  recipes:[],
-  transactions:[],
-  expenses:[],
-  stockMoves:[],
-  purchases:[],
-  stockPeriods:{},
-  nextId:1
-};
-// Normalisasi struktur data tanpa menambahkan data demo.
-db.menus = Array.isArray(db.menus) ? db.menus : [];
-db.bahan = Array.isArray(db.bahan) ? db.bahan : [];
-db.recipes = Array.isArray(db.recipes) ? db.recipes : [];
-db.transactions = Array.isArray(db.transactions) ? db.transactions : [];
-db.expenses = Array.isArray(db.expenses) ? db.expenses : [];
-db.stockMoves = Array.isArray(db.stockMoves) ? db.stockMoves : [];
-// Pembelian disimpan dalam ledger khusus agar selalu menjadi sumber stok masuk.
-if(!Array.isArray(db.purchases)) db.purchases = db.stockMoves.filter(m=>m && m.type==='purchase').map(m=>({...m}));
-db.stockPeriods = db.stockPeriods && typeof db.stockPeriods==='object' ? db.stockPeriods : {};
-db.nextId = Number.isFinite(+db.nextId) ? +db.nextId : 1;
-if(!db.settings || typeof db.settings!=='object') db.settings={name:'KopiKasir Coffee',phone:'',address:'',logo:''};
-if(!('logo' in db.settings)) db.settings.logo='';
-// Struktur bahan: harga selalu harga 1 kemasan utuh, stok memakai satuan dasar.
-db.bahan.forEach(b=>{
-  if(!b.unit) b.unit='gram';
-  if(!Number.isFinite(+b.content) || +b.content<=0) b.content=1;
-  if(!Number.isFinite(+b.cost)) b.cost=0;
-  if(!Number.isFinite(+b.min)) b.min=0;
-});
+  menus:[],bahan:[],recipes:[],transactions:[],expenses:[],stockMoves:[],purchases:[],stockPeriods:{},nextId:1
+}}
+function usernameEmail(username){return String(username||'').trim().toLowerCase()+'@login.ekasir.local'}
+function validUsername(u){return /^[a-zA-Z0-9._-]{3,30}$/.test(String(u||''))}
+function cloudConfig(){try{return JSON.parse(localStorage.getItem(CLOUD_KEY)||'null')||{}}catch(e){return {}}}
+function loadCloudConfigToForm(){
+  const c=cloudConfig();
+  if(document.getElementById('cloudUrl'))document.getElementById('cloudUrl').value=c.url||'';
+  if(document.getElementById('cloudAnonKey'))document.getElementById('cloudAnonKey').value=c.key||'';
+}
+function saveCloudConfig(){
+  const url=(document.getElementById('cloudUrl')?.value||'').trim().replace(/\/$/,'');
+  const key=(document.getElementById('cloudAnonKey')?.value||'').trim();
+  if(!/^https:\/\/[^\s]+\.supabase\.co$/i.test(url))return toast('Project URL cloud tidak valid');
+  if(!key)return toast('Anon/public key wajib diisi');
+  localStorage.setItem(CLOUD_KEY,JSON.stringify({url,key}));
+  toast('Konfigurasi cloud tersimpan');
+}
+function cloudHeaders(c){return {'Content-Type':'application/json','apikey':c.key}}
+async function supa(path,options={}){
+  const c=cloudConfig();
+  if(!c.url||!c.key)throw new Error('Project URL dan anon/public key belum diatur.');
+  const res=await fetch(c.url+path,{...options,headers:{...cloudHeaders(c),...(options.headers||{})}});
+  let data=null;try{data=await res.json()}catch(e){}
+  if(!res.ok)throw new Error(data?.msg||data?.message||data?.error_description||data?.error||('HTTP '+res.status));
+  return data;
+}
+function showAuthMessage(msg,type='err'){
+  const el=document.getElementById('authMsg');if(!el)return;
+  el.textContent=msg;el.className='auth-msg show '+type;
+}
+let authMode='login';
+function switchAuth(mode){
+  authMode=mode;
+  document.getElementById('tabLogin').classList.toggle('active',mode==='login');
+  document.getElementById('tabRegister').classList.toggle('active',mode==='register');
+  document.getElementById('authTitle').textContent=mode==='login'?'Masuk':'Buat Akun';
+  document.getElementById('authSubtitle').textContent=mode==='login'?'Masuk menggunakan username dan password Anda.':'Buat akun baru untuk menggunakan e-Kasir.';
+  document.getElementById('authSubmit').textContent=mode==='login'?'Masuk':'Daftar';
+  document.getElementById('authConfirmWrap').style.display=mode==='register'?'grid':'none';
+  document.getElementById('authMsg').className='auth-msg';
+}
+async function submitAuth(ev){
+  ev.preventDefault();
+  const u=document.getElementById('authUsername').value.trim().toLowerCase();
+  const p=document.getElementById('authPassword').value;
+  if(!validUsername(u))return showAuthMessage('Username 3–30 karakter: hanya huruf, angka, titik, garis bawah, atau minus.');
+  if(p.length<6)return showAuthMessage('Password minimal 6 karakter.');
+  if(authMode==='register'&&p!==document.getElementById('authPassword2').value)return showAuthMessage('Konfirmasi password tidak sama.');
+  const btn=document.getElementById('authSubmit');btn.disabled=true;btn.textContent='Memproses...';
+  try{
+    const email=usernameEmail(u);
+    if(authMode==='register'){
+      await supa('/auth/v1/signup',{method:'POST',body:JSON.stringify({email,password:p,data:{username:u}})});
+      const session=await supa('/auth/v1/token?grant_type=password',{method:'POST',body:JSON.stringify({email,password:p})});
+      await finishLogin(u,session);
+      showAuthMessage('Akun berhasil dibuat.','ok');
+    }else{
+      const session=await supa('/auth/v1/token?grant_type=password',{method:'POST',body:JSON.stringify({email,password:p})});
+      await finishLogin(u,session);
+    }
+  }catch(e){
+    let msg=e.message||'Login gagal';
+    if(/email not confirmed/i.test(msg))msg='Email Confirmation masih aktif. Untuk login username/password ini, matikan konfirmasi email di Auth.';
+    if(/invalid login credentials/i.test(msg))msg='Username atau password salah.';
+    showAuthMessage(msg);
+  }finally{btn.disabled=false;btn.textContent=authMode==='login'?'Masuk':'Daftar'}
+}
+async function finishLogin(username,session){
+  if(!session?.access_token)throw new Error('Token login tidak diterima.');
+  currentUser={username,access_token:session.access_token,refresh_token:session.refresh_token||'',user:session.user||null};
+  localStorage.setItem(AUTH_KEY,JSON.stringify(currentUser));
+  KEY=BASE_KEY+'_'+username;
+  db=JSON.parse(localStorage.getItem(KEY)||'null')||blankDb();
+  normalizeDb();
+  document.getElementById('authScreen').style.display='none';
+  renderUserChip();loadCloudConfigToForm();renderAll();
+}
+function normalizeDb(){
+  if(!db||typeof db!=='object')db=blankDb();
+  db.menus=Array.isArray(db.menus)?db.menus:[];db.bahan=Array.isArray(db.bahan)?db.bahan:[];
+  db.recipes=Array.isArray(db.recipes)?db.recipes:[];db.transactions=Array.isArray(db.transactions)?db.transactions:[];
+  db.expenses=Array.isArray(db.expenses)?db.expenses:[];db.stockMoves=Array.isArray(db.stockMoves)?db.stockMoves:[];
+  if(!Array.isArray(db.purchases))db.purchases=db.stockMoves.filter(m=>m&&m.type==='purchase').map(m=>({...m}));
+  db.stockPeriods=db.stockPeriods&&typeof db.stockPeriods==='object'?db.stockPeriods:{};
+  db.nextId=Number.isFinite(+db.nextId)?+db.nextId:1;
+  if(!db.settings||typeof db.settings!=='object')db.settings={name:'KopiKasir Coffee',phone:'',address:'',logo:''};
+  if(!('logo' in db.settings))db.settings.logo='';
+  db.bahan.forEach(b=>{if(!b.unit)b.unit='gram';if(!Number.isFinite(+b.content)||+b.content<=0)b.content=1;if(!Number.isFinite(+b.cost))b.cost=0;if(!Number.isFinite(+b.min))b.min=0});
+}
+function renderUserChip(){
+  const el=document.getElementById('userChip');if(!el)return;
+  el.innerHTML=currentUser?'<div class="user-avatar">👤</div><div><b style="font-size:12px">'+currentUser.username+'</b><small style="display:block;color:var(--muted)">Akun aktif</small></div>':'';
+}
+function logout(){
+  if(!confirm('Keluar dari akun ini?'))return;
+  localStorage.removeItem(AUTH_KEY);currentUser=null;KEY=BASE_KEY;db=blankDb();
+  document.getElementById('authScreen').style.display='grid';
+  document.getElementById('authUsername').value='';document.getElementById('authPassword').value='';
+  switchAuth('login');renderUserChip();
+}
+async function restoreSession(){
+  loadCloudConfigToForm();
+  const s=localStorage.getItem(AUTH_KEY);
+  if(!s){document.getElementById('authScreen').style.display='grid';return}
+  try{
+    currentUser=JSON.parse(s);
+    if(!currentUser?.username||!currentUser?.access_token)throw 0;
+    KEY=BASE_KEY+'_'+currentUser.username;
+    db=JSON.parse(localStorage.getItem(KEY)||'null')||blankDb();
+    normalizeDb();document.getElementById('authScreen').style.display='none';renderUserChip();renderAll();
+  }catch(e){localStorage.removeItem(AUTH_KEY);currentUser=null;document.getElementById('authScreen').style.display='grid'}
+}
 function defaultRange(){const d=new Date(); const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'); const last=new Date(y,d.getMonth()+1,0).getDate(); return {from:`${y}-${m}-01`,to:`${y}-${m}-${String(last).padStart(2,'0')}`};}
 function rangeKey(from,to){return (from||'')+'__'+(to||'')}
 function getRange(){const a=document.getElementById('stockFrom')?.value,b=document.getElementById('stockTo')?.value; if(a&&b&&a<=b)return {from:a,to:b}; const d=defaultRange(); return d;}
@@ -417,11 +549,8 @@ function saveSettings(){
    db.settings={name:shopName.value,phone:shopPhone.value,address:shopAddress.value,logo:logo||''};
    save();renderAll();toast('Pengaturan tersimpan');
  };
- if(file){
-   const reader=new FileReader();
-   reader.onload=()=>finish(String(reader.result||''));
-   reader.readAsDataURL(file);
- }else finish(oldLogo);
+ if(file){const reader=new FileReader();reader.onload=()=>finish(String(reader.result||''));reader.readAsDataURL(file)}
+ else finish(oldLogo);
 }
 function previewLogo(input){
  const file=input?.files?.[0],box=document.getElementById('logoPreview');
@@ -506,7 +635,7 @@ function renderAll(){
  shopName.value=db.settings.name||'';shopPhone.value=db.settings.phone||'';shopAddress.value=db.settings.address||'';
  renderLogoSetting();
 }
-renderAll();
+restoreSession();
 </script>
 </body>
 </html>
