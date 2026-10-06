@@ -1702,6 +1702,82 @@
     }
 }
 
+
+/* ===== MOBILE PRODUCT CARD: BUTTON BELOW ===== */
+@media (max-width:760px) {
+    .product-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+
+    .product {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        min-height: 220px;
+        padding: 12px;
+    }
+
+    .product .emoji {
+        flex: 0 0 auto;
+        margin-bottom: 10px;
+    }
+
+    .product h3 {
+        margin: 0 0 5px;
+        min-height: 20px;
+    }
+
+    .product p {
+        margin: 0 0 12px;
+        min-height: 18px;
+    }
+
+    .product .price {
+        margin-top: auto;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 9px;
+    }
+
+    .product .price b,
+    .product .price .price-value {
+        font-size: 15px;
+    }
+
+    .product .price button,
+    .product button {
+        width: 100%;
+        min-height: 42px;
+        padding: 9px 10px;
+        border-radius: 11px;
+        font-size: 14px;
+    }
+}
+
+@media (max-width:480px) {
+    .product-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+
+    .product {
+        min-height: 215px;
+        padding: 11px;
+    }
+
+    .product .price {
+        gap: 8px;
+    }
+
+    .product .price button,
+    .product button {
+        min-height: 40px;
+        font-size: 13px;
+    }
+}
+
 </style>
 </head>
 
