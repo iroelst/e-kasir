@@ -4037,11 +4037,10 @@ let pendingPurchaseBahanId = null;
             shopAddress.value = db.settings.address || '';
             renderLogoSetting();
         }
-        restoreSession();
-    </script>
-</body>
 
-</html>        async function saveSettings() {
+
+
+        async function saveSettings() {
             const oldLogo = db.settings?.logo || '';
             const file = document.getElementById('shopLogo')?.files?.[0];
             try {
@@ -4056,19 +4055,24 @@ let pendingPurchaseBahanId = null;
                 }
 
                 db.settings = {
-                    name: shopName.value,
-                    phone: shopPhone.value,
-                    address: shopAddress.value,
+                    name: (document.getElementById('shopName')?.value || '').trim(),
+                    phone: (document.getElementById('shopPhone')?.value || '').trim(),
+                    address: (document.getElementById('shopAddress')?.value || '').trim(),
                     logo: logo || ''
                 };
 
-                // 100% gratis: logo disimpan sebagai Data URL/Base64 di Firestore.
+                // Tetap 100% gratis: logo disimpan sebagai Data URL/Base64 di Firestore.
                 await fbFs.doc('toko/' + SHOP_ID + '/settings/profile').set(db.settings, { merge: true });
                 localStorage.setItem(KEY, JSON.stringify(db));
                 renderAll();
-                toast('Pengaturan tersimpan · logo maksimal 200 KB');
+                toast('Pengaturan tersimpan');
             } catch (e) {
                 console.error('saveSettings:', e);
                 toast(e?.message || 'Gagal menyimpan pengaturan');
             }
         }
+        restoreSession();
+    </script>
+</body>
+
+</html>
