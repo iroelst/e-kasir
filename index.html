@@ -1979,6 +1979,140 @@
     }
 }
 
+
+/* ===== HEADER STATUS + ROLE ===== */
+.cloud-dot.sync-status {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 7px;
+    white-space: nowrap;
+    color: #64748b !important;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.sync-indicator {
+    width: 9px;
+    height: 9px;
+    min-width: 9px;
+    border-radius: 50%;
+    display: inline-block;
+    background: #94a3b8;
+    box-shadow: 0 0 0 3px rgba(148,163,184,.12);
+}
+
+.sync-status.online {
+    color: #218a55 !important;
+}
+
+.sync-indicator.online {
+    background: #22c55e;
+    box-shadow: 0 0 0 3px rgba(34,197,94,.14);
+}
+
+.sync-status.offline {
+    color: #dc2626 !important;
+}
+
+.sync-indicator.offline {
+    background: #ef4444;
+    box-shadow: 0 0 0 3px rgba(239,68,68,.14);
+}
+
+.sync-status.checking {
+    color: #a16207 !important;
+}
+
+.sync-indicator.checking {
+    background: #f59e0b;
+    box-shadow: 0 0 0 3px rgba(245,158,11,.14);
+}
+
+.user-chip {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 10px 6px 6px;
+    border: 1px solid var(--line);
+    background: #fff;
+    border-radius: 12px;
+    white-space: nowrap;
+}
+
+.user-avatar {
+    width: 29px !important;
+    height: 29px !important;
+    border-radius: 9px !important;
+    font-size: 15px;
+}
+
+.user-role-label {
+    font-size: 12px;
+    font-weight: 800;
+    color: #1f2937;
+}
+
+@media (max-width:760px) {
+    .cloud-dot.sync-status {
+        font-size: 10px;
+        gap: 5px;
+    }
+
+    .sync-indicator {
+        width: 8px;
+        min-width: 8px;
+        height: 8px;
+    }
+
+    .user-chip {
+        padding: 4px 7px 4px 4px;
+        gap: 5px;
+        border-radius: 10px;
+    }
+
+    .user-avatar {
+        width: 27px !important;
+        height: 27px !important;
+        border-radius: 8px !important;
+    }
+
+    .user-role-label {
+        font-size: 10px;
+    }
+}
+
+
+/* ===== SYNC DOT ONLY ===== */
+.cloud-dot.sync-status {
+    width: 12px !important;
+    min-width: 12px !important;
+    height: 12px;
+    padding: 0 !important;
+    gap: 0 !important;
+    font-size: 0 !important;
+    color: transparent !important;
+}
+
+.cloud-dot.sync-status .sync-indicator {
+    width: 10px;
+    min-width: 10px;
+    height: 10px;
+}
+
+@media (max-width:760px) {
+    .cloud-dot.sync-status {
+        width: 10px !important;
+        min-width: 10px !important;
+        height: 10px;
+    }
+
+    .cloud-dot.sync-status .sync-indicator {
+        width: 9px;
+        min-width: 9px;
+        height: 9px;
+    }
+}
+
 </style>
 </head>
 
@@ -2425,8 +2559,11 @@
         function setCloudStatus(t, ok = false) {
             const e = document.getElementById('cloudStatus');
             if (e) {
-                e.textContent = '☁️ ' + t;
-                e.style.color = ok ? 'var(--success)' : 'var(--muted)'
+                const isFail = /gagal|tidak|belum/i.test(String(t));
+                const isOk = ok || /tersinkron/i.test(String(t));
+                e.innerHTML = '<span class="sync-indicator ' + (isOk ? 'online' : (isFail ? 'offline' : 'checking')) + '" title="' +
+                    (isOk ? 'Tersinkron' : (isFail ? 'Tidak tersinkron' : 'Menghubungkan...')) + '"></span>';
+                e.className = 'cloud-dot sync-status ' + (isOk ? 'online' : (isFail ? 'offline' : 'checking'));
             }
         }
 
@@ -2654,7 +2791,9 @@
         function renderUserChip() {
             const el = document.getElementById('userChip');
             if (!el) return;
-            el.innerHTML = currentUser ? '<div class="user-avatar">👤</div><div><b style="font-size:12px">' + (currentUser.email || '') + '</b><small style="display:block;color:var(--muted)">' + (currentRole || 'belum ada role') + '</small></div>' : ''
+            const role = String(currentRole || '').toLowerCase();
+            const label = role === 'admin' ? 'Admin' : (role === 'kasir' ? 'Kasir' : 'User');
+            el.innerHTML = currentUser ? '<div class="user-avatar">👤</div><div class="user-role-label">' + label + '</div>' : '';
         }
         async function logout() {
             try {
