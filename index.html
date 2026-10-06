@@ -446,6 +446,195 @@
             color: #fff
         }
 
+        /* ===== PAYMENT CHECKOUT ===== */
+        .payment-modal {
+            display: grid;
+            gap: 14px;
+        }
+
+        .payment-total {
+            background: linear-gradient(135deg, #111827, #2b2118);
+            color: #fff;
+            border-radius: 18px;
+            padding: 17px;
+        }
+
+        .payment-total small {
+            opacity: .72;
+            display: block;
+            font-size: 11px;
+        }
+
+        .payment-total strong {
+            display: block;
+            font-size: 28px;
+            margin-top: 4px;
+            letter-spacing: -.5px;
+        }
+
+        .payment-methods {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+
+        .payment-method {
+            border: 1px solid var(--line);
+            background: #fff;
+            border-radius: 14px;
+            padding: 12px 8px;
+            text-align: center;
+            font-weight: 700;
+            transition: .15s;
+        }
+
+        .payment-method span {
+            display: block;
+            font-size: 21px;
+            margin-bottom: 4px;
+        }
+
+        .payment-method small {
+            display: block;
+            color: var(--muted);
+            font-size: 10px;
+            font-weight: 500;
+        }
+
+        .payment-method.active {
+            background: #f6eee7;
+            color: var(--primary2);
+            border-color: #c99669;
+            box-shadow: 0 0 0 2px rgba(166,106,55,.10);
+        }
+
+        .payment-field {
+            display: grid;
+            gap: 7px;
+        }
+
+        .payment-field label {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--muted);
+        }
+
+        .payment-input {
+            width: 100%;
+            padding: 14px;
+            border: 1px solid var(--line);
+            border-radius: 13px;
+            font-size: 20px;
+            font-weight: 800;
+            outline: none;
+            background: #fff;
+        }
+
+        .payment-input:focus {
+            border-color: #b98252;
+            box-shadow: 0 0 0 3px rgba(166,106,55,.12);
+        }
+
+        .payment-change {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 13px;
+            border-radius: 13px;
+            background: #f8fafc;
+        }
+
+        .payment-change strong {
+            font-size: 18px;
+        }
+
+        .payment-change.negative {
+            background: #fef2f2;
+            color: #b91c1c;
+        }
+
+        .payment-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .payment-actions .btn {
+            width: 100%;
+        }
+
+        .payment-success {
+            text-align: center;
+            padding: 6px 0 2px;
+        }
+
+        .payment-success .success-icon {
+            width: 62px;
+            height: 62px;
+            margin: 0 auto 12px;
+            border-radius: 50%;
+            background: #dcfce7;
+            color: #15803d;
+            display: grid;
+            place-items: center;
+            font-size: 30px;
+        }
+
+        .payment-success h3 {
+            margin: 0 0 5px;
+            font-size: 21px;
+        }
+
+        .payment-success p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .payment-success .receipt-summary {
+            margin: 16px 0;
+            padding: 13px;
+            border-radius: 13px;
+            background: #f8fafc;
+            text-align: left;
+        }
+
+        .payment-success .receipt-summary div {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            margin: 5px 0;
+        }
+
+        .status-paid {
+            background: #dcfce7 !important;
+            color: #166534 !important;
+        }
+
+        .status-unpaid {
+            background: #fee2e2 !important;
+            color: #991b1b !important;
+        }
+
+        .status-partial {
+            background: #fef3c7 !important;
+            color: #92400e !important;
+        }
+
+        @media(max-width:480px) {
+            .payment-method {
+                padding: 10px 5px;
+            }
+
+            .payment-total strong {
+                font-size: 25px;
+            }
+
+            .payment-actions {
+                grid-template-columns: 1fr;
+            }
+        }
+
         .empty {
             text-align: center;
             color: var(--muted);
@@ -1525,6 +1714,12 @@
                         </div>
                         <div class="icon">💸</div>
                     </div>
+                    <div class="card metric receivable-card">
+                        <div><small>Belum Dibayar</small><strong id="mPiutang">Rp0</strong>
+                            <div class="trend receivable-trend" id="mPiutangCount">0 transaksi</div>
+                        </div>
+                        <div class="icon">⏳</div>
+                    </div>
                 </div>
                 <div class="grid2">
                     <div class="card">
@@ -1748,10 +1943,12 @@
                                     <th>Tanggal</th>
                                     <th>Item</th>
                                     <th>Pembayaran</th>
+                                    <th>Status</th>
+                                    <th>Sisa</th>
                                     <th>Omzet</th>
                                     <th>HPP</th>
                                     <th>Laba</th>
-                                    <th class="no-print">Nota</th>
+                                    <th class="no-print">Aksi</th>
                                 </tr>
                             </thead>
                             <tbody id="reportTable"></tbody>
@@ -2329,7 +2526,8 @@ let pendingPurchaseBahanId = null;
 
         let cart = [],
             pay = 'Tunai',
-            activeCat = 'Semua';
+            activeCat = 'Semua',
+            pendingCheckout = null;
         const rupiah = n => new Intl.NumberFormat('id-ID', {
             style: 'currency',
             currency: 'IDR',
@@ -2380,6 +2578,13 @@ let pendingPurchaseBahanId = null;
             mHpp.textContent = rupiah(hp);
             mLaba.textContent = rupiah(om - hp);
             mKeluar.textContent = rupiah(ex);
+
+            const unpaid = db.transactions.filter(t => (t.status || 'lunas') !== 'lunas');
+            const unpaidTotal = unpaid.reduce((a, t) => a + Math.max(0, (+t.total || 0) - (+t.paidAmount || 0)), 0);
+            const piutangEl = document.getElementById('mPiutang');
+            const piutangCountEl = document.getElementById('mPiutangCount');
+            if (piutangEl) piutangEl.textContent = rupiah(unpaidTotal);
+            if (piutangCountEl) piutangCountEl.textContent = `${unpaid.length} transaksi belum lunas`;
             const rr = getReportRange(),
                 rtx = rangeTransactions(rr.from, rr.to),
                 rex = db.expenses.filter(x => inRange(x.date, rr.from, rr.to));
@@ -2394,7 +2599,12 @@ let pendingPurchaseBahanId = null;
 
         function renderRecent() {
             let x = todayTx().slice(-6).reverse();
-            recent.innerHTML = x.length ? x.map(t => `<div class="cart-item"><div><b>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</b><small style="display:block;color:var(--muted)">${t.time} · ${t.pay}</small></div><div style="display:flex;align-items:center;gap:8px"><b>${rupiah(t.total)}</b><button class="btn no-print" onclick="openThermalOptions(${t.id})">🧾</button></div></div>`).join('') : '<div class="empty">Belum ada transaksi hari ini.</div>'
+            recent.innerHTML = x.length ? x.map(t => {
+                const status = t.status || 'lunas';
+                const cls = status === 'lunas' ? 'status-paid' : status === 'sebagian' ? 'status-partial' : 'status-unpaid';
+                const label = status === 'lunas' ? 'Lunas' : status === 'sebagian' ? 'Belum Lunas' : 'Belum Bayar';
+                return `<div class="cart-item"><div><b>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</b><small style="display:block;color:var(--muted)">${t.time} · ${t.pay} · <span class="badge ${cls}">${label}</span></small></div><div style="display:flex;align-items:center;gap:8px"><b>${rupiah(t.total)}</b><button class="btn no-print" onclick="openThermalOptions(${t.id})">🧾</button></div></div>`;
+            }).join('') : '<div class="empty">Belum ada transaksi hari ini.</div>'
         }
 
         function renderLow() {
@@ -2462,45 +2672,249 @@ let pendingPurchaseBahanId = null;
 
         function checkout() {
             if (!cart.length) return toast('Keranjang masih kosong');
-            const rr = defaultRange(),
-                need = {};
+
+            const rr = defaultRange(), need = {};
             cart.forEach(it => {
                 const r = db.recipes.find(x => x.menuId === it.id);
                 if (r) r.items.forEach(item => {
                     const z = recipeItemParts(item);
-                    if (z.name) need[z.name] = (need[z.name] || 0) + z.qty * (+it.qty || 0)
-                })
+                    if (z.name) need[z.name] = (need[z.name] || 0) + z.qty * (+it.qty || 0);
+                });
             });
+
             for (const name in need) {
                 const b = db.bahan.find(x => x.name === name);
                 if (!b) continue;
                 const avail = stockSummary(b, rr.from, rr.to).ending;
-                if (avail < need[name] - 1e-9) return toast(`Stok ${name} tidak cukup`)
+                if (avail < need[name] - 1e-9) return toast(`Stok ${name} tidak cukup`);
             }
-            let total = cart.reduce((a, i) => a + i.price * i.qty, 0),
-                hpp = cart.reduce((a, i) => a + i.hpp * i.qty, 0),
-                d = new Date();
-            db.transactions.push({
-                id: db.nextId++,
-                date: today(),
-                time: d.toLocaleTimeString('id-ID', {
-                    hour: '2-digit',
-                    minute: '2-digit'
-                }),
-                items: cart.map(i => ({
-                    ...i
-                })),
+
+            const total = cart.reduce((a, i) => a + i.price * i.qty, 0);
+            const hpp = cart.reduce((a, i) => a + i.hpp * i.qty, 0);
+
+            pendingCheckout = {
+                items: cart.map(i => ({ ...i })),
                 total,
                 hpp,
-                pay
+                pay: pay || 'Tunai'
+            };
+            openPaymentModal();
+        }
+
+        function openPaymentModal(existingId = null) {
+            let source;
+            if (existingId) {
+                const t = db.transactions.find(x => x.id === existingId);
+                if (!t) return toast('Transaksi tidak ditemukan');
+                pendingCheckout = {
+                    existingId: t.id,
+                    items: t.items.map(i => ({...i})),
+                    total: +t.total || 0,
+                    hpp: +t.hpp || 0,
+                    pay: t.pay || 'Tunai',
+                    originalPaid: +t.paidAmount || 0
+                };
+            }
+            source = pendingCheckout;
+            if (!source) return;
+
+            const currentPaid = Math.max(0, +source.originalPaid || 0);
+            const defaultPaid = currentPaid || (source.pay === 'Tunai' ? '' : source.total);
+
+            openModal(existingId ? 'Selesaikan Pembayaran' : 'Pembayaran Transaksi', `
+                <div class="payment-modal">
+                    <div class="payment-total">
+                        <small>TOTAL YANG HARUS DIBAYAR</small>
+                        <strong id="paymentTotal">${rupiah(source.total)}</strong>
+                    </div>
+
+                    <div>
+                        <label style="font-size:12px;font-weight:700;color:var(--muted);display:block;margin-bottom:7px">METODE PEMBAYARAN</label>
+                        <div class="payment-methods">
+                            <button type="button" class="payment-method ${source.pay==='Tunai'?'active':''}" onclick="selectCheckoutPay('Tunai')"><span>💵</span>Tunai<small>Hitung kembalian</small></button>
+                            <button type="button" class="payment-method ${source.pay==='QRIS'?'active':''}" onclick="selectCheckoutPay('QRIS')"><span>▣</span>QRIS<small>Scan / konfirmasi</small></button>
+                            <button type="button" class="payment-method ${source.pay==='Transfer'?'active':''}" onclick="selectCheckoutPay('Transfer')"><span>🏦</span>Transfer<small>Konfirmasi transfer</small></button>
+                        </div>
+                    </div>
+
+                    <div class="payment-field">
+                        <label>NOMINAL DIBAYAR</label>
+                        <input id="paymentAmount" class="payment-input" type="number" inputmode="numeric" min="0" step="1" value="${defaultPaid}" placeholder="Masukkan nominal" oninput="updatePaymentChange()">
+                    </div>
+
+                    <div id="paymentChangeBox" class="payment-change">
+                        <span id="paymentChangeLabel">Kembalian</span>
+                        <strong id="paymentChange">Rp0</strong>
+                    </div>
+
+                    <div id="paymentHint" style="font-size:12px;color:var(--muted);line-height:1.5">
+                        Untuk pembayaran tunai, masukkan nominal uang yang diterima.
+                    </div>
+
+                    <div class="payment-actions">
+                        <button class="btn" type="button" onclick="saveUnpaidCheckout()">⏳ Belum Bayar</button>
+                        <button class="btn primary" type="button" onclick="confirmCheckoutPayment()">✓ Konfirmasi Pembayaran</button>
+                    </div>
+                </div>
+            `);
+            updatePaymentChange();
+        }
+
+        function selectCheckoutPay(method) {
+            if (!pendingCheckout) return;
+            pendingCheckout.pay = method;
+            document.querySelectorAll('.payment-method').forEach(b => {
+                const txt = b.textContent || '';
+                b.classList.toggle('active', txt.includes(method));
             });
-            // Pemakaian dihitung dari transaksi + resep pada periode berjalan.
-            // Tidak mengubah b.stock agar Stok Awal/Pembelian/Stok Akhir tetap menjadi sumber kebenaran.
+            const input = document.getElementById('paymentAmount');
+            const hint = document.getElementById('paymentHint');
+            const label = document.getElementById('paymentChangeLabel');
+            if (method !== 'Tunai') {
+                if (input && !+input.value) input.value = pendingCheckout.total;
+                if (hint) hint.textContent = `Jika ${method} belum diterima, pilih “Belum Bayar”.`;
+                if (label) label.textContent = 'Status pembayaran';
+            } else {
+                if (hint) hint.textContent = 'Untuk pembayaran tunai, masukkan nominal uang yang diterima.';
+                if (label) label.textContent = 'Kembalian';
+            }
+            updatePaymentChange();
+        }
+
+        function updatePaymentChange() {
+            if (!pendingCheckout) return;
+            const amount = Math.max(0, +(document.getElementById('paymentAmount')?.value || 0));
+            const total = +pendingCheckout.total || 0;
+            const box = document.getElementById('paymentChangeBox');
+            const value = document.getElementById('paymentChange');
+            const label = document.getElementById('paymentChangeLabel');
+            if (!box || !value) return;
+
+            if (pendingCheckout.pay === 'Tunai') {
+                const change = amount - total;
+                label.textContent = change >= 0 ? 'Kembalian' : 'Kurang Bayar';
+                value.textContent = rupiah(Math.abs(change));
+                box.classList.toggle('negative', change < 0);
+            } else {
+                const remaining = Math.max(0, total - amount);
+                label.textContent = remaining > 0 ? 'Sisa Tagihan' : 'Status pembayaran';
+                value.textContent = remaining > 0 ? rupiah(remaining) : 'Lunas';
+                box.classList.toggle('negative', remaining > 0);
+            }
+        }
+
+        function saveCheckoutRecord(status, paidAmount, change = 0) {
+            const d = new Date();
+            const record = {
+                id: db.nextId++,
+                date: today(),
+                time: d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+                items: pendingCheckout.items.map(i => ({ ...i })),
+                total: +pendingCheckout.total || 0,
+                hpp: +pendingCheckout.hpp || 0,
+                pay: pendingCheckout.pay || 'Tunai',
+                paidAmount: Math.max(0, +paidAmount || 0),
+                change: Math.max(0, +change || 0),
+                status: status
+            };
+            db.transactions.push(record);
             save();
-            toast('Transaksi berhasil disimpan');
+            return record;
+        }
+
+        function confirmCheckoutPayment() {
+            if (!pendingCheckout) return;
+            const amount = Math.max(0, +(document.getElementById('paymentAmount')?.value || 0));
+            const total = +pendingCheckout.total || 0;
+
+            if (pendingCheckout.pay === 'Tunai' && amount < total) {
+                return toast(`Nominal tunai masih kurang ${rupiah(total - amount)}`);
+            }
+
+            if (pendingCheckout.existingId) {
+                const t = db.transactions.find(x => x.id === pendingCheckout.existingId);
+                if (!t) return toast('Transaksi tidak ditemukan');
+                const previous = +t.paidAmount || 0;
+                const newPaid = previous + amount;
+                t.paidAmount = newPaid;
+                t.status = newPaid >= total ? 'lunas' : newPaid > 0 ? 'sebagian' : 'belum bayar';
+                t.change = t.pay === 'Tunai' ? Math.max(0, newPaid - total) : 0;
+                save();
+                const done = t.status === 'lunas';
+                closeModal();
+                pendingCheckout = null;
+                cart = [];
+                renderAll();
+                if (done) openPaymentSuccess(t);
+                else toast('Pembayaran tersimpan, masih ada sisa tagihan');
+                return;
+            }
+
+            const change = pendingCheckout.pay === 'Tunai' ? Math.max(0, amount - total) : 0;
+            const record = saveCheckoutRecord('lunas', amount, change);
+            closeModal();
+            pendingCheckout = null;
             cart = [];
             renderAll();
+            openPaymentSuccess(record);
         }
+
+        function saveUnpaidCheckout() {
+            if (!pendingCheckout) return;
+            const amount = Math.max(0, +(document.getElementById('paymentAmount')?.value || 0));
+            const total = +pendingCheckout.total || 0;
+
+            if (pendingCheckout.existingId) {
+                const t = db.transactions.find(x => x.id === pendingCheckout.existingId);
+                if (!t) return toast('Transaksi tidak ditemukan');
+                const newPaid = (+t.paidAmount || 0) + amount;
+                t.paidAmount = newPaid;
+                t.status = newPaid >= total ? 'lunas' : newPaid > 0 ? 'sebagian' : 'belum bayar';
+                t.change = 0;
+                save();
+                closeModal();
+                pendingCheckout = null;
+                renderAll();
+                toast(t.status === 'lunas' ? 'Pembayaran lunas' : 'Pembayaran belum lunas');
+                if (t.status === 'lunas') openPaymentSuccess(t);
+                return;
+            }
+
+            const status = amount >= total && total > 0 ? 'lunas' : amount > 0 ? 'sebagian' : 'belum bayar';
+            const record = saveCheckoutRecord(status, amount, 0);
+            closeModal();
+            pendingCheckout = null;
+            cart = [];
+            renderAll();
+
+            if (status === 'lunas') openPaymentSuccess(record);
+            else toast(status === 'sebagian' ? `Tersimpan. Sisa ${rupiah(total - amount)}` : 'Transaksi tersimpan sebagai belum bayar');
+        }
+
+        function openSettlePayment(id) {
+            openPaymentModal(id);
+        }
+
+        function openPaymentSuccess(t) {
+            openModal('Pembayaran Berhasil', `
+                <div class="payment-success">
+                    <div class="success-icon">✓</div>
+                    <h3>Pembayaran Lunas</h3>
+                    <p>Transaksi #${t.id} berhasil disimpan ke riwayat.</p>
+                    <div class="receipt-summary">
+                        <div><span>Total</span><b>${rupiah(t.total)}</b></div>
+                        <div><span>Pembayaran</span><b>${t.pay}</b></div>
+                        <div><span>Dibayar</span><b>${rupiah(t.paidAmount || t.total)}</b></div>
+                        ${t.pay === 'Tunai' ? `<div><span>Kembalian</span><b>${rupiah(t.change || 0)}</b></div>` : ''}
+                    </div>
+                    <div class="payment-actions">
+                        <button class="btn" type="button" onclick="closeModal()">Selesai</button>
+                        <button class="btn primary" type="button" onclick="openThermalOptions(${t.id})">🧾 Cetak Nota</button>
+                    </div>
+                </div>
+            `);
+        }
+
 
         function renderMenuTable() {
             let q = (menuSearch.value || '').toLowerCase();
@@ -2637,7 +3051,13 @@ let pendingPurchaseBahanId = null;
                 tx = rangeTransactions(r.from, r.to).slice().reverse();
             const label = document.getElementById('reportPeriodLabel');
             if (label) label.textContent = `${r.from.split('-').reverse().join('/')} – ${r.to.split('-').reverse().join('/')}`;
-            reportTable.innerHTML = tx.map(t => `<tr><td>${t.date} ${t.time}</td><td>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</td><td>${t.pay}</td><td>${rupiah(t.total)}</td><td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td><td class="no-print"><button class="btn" onclick="openThermalOptions(${t.id})">🧾 Nota</button></td></tr>`).join('') || '<tr><td colspan="7"><div class="empty">Belum ada transaksi pada periode ini.</div></td></tr>';
+            reportTable.innerHTML = tx.map(t => {
+                const status = t.status || 'lunas';
+                const cls = status === 'lunas' ? 'status-paid' : status === 'sebagian' ? 'status-partial' : 'status-unpaid';
+                const label = status === 'lunas' ? 'Lunas' : status === 'sebagian' ? 'Belum Lunas' : 'Belum Bayar';
+                const remaining = Math.max(0, (+t.total || 0) - (+t.paidAmount || 0));
+                return `<tr><td>${t.date} ${t.time}</td><td>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</td><td>${t.pay}</td><td><span class="badge ${cls}">${label}</span></td><td>${remaining ? rupiah(remaining) : '-'}</td><td>${rupiah(t.total)}</td><td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td><td class="no-print"><button class="btn" onclick="openThermalOptions(${t.id})">🧾 Nota</button>${status !== 'lunas' ? `<button class="btn" style="margin-left:5px" onclick="openSettlePayment(${t.id})">💳 Bayar</button>` : ''}</td></tr>`;
+            }).join('') || '<tr><td colspan="9"><div class="empty">Belum ada transaksi pada periode ini.</div></td></tr>';
         }
 
         function updateRecipeDraft(i) {
