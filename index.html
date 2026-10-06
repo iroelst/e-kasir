@@ -2492,8 +2492,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-storage-compat.js"></script>
-    <script>
+        <script>
         const FIREBASE_CONFIG = {
             apiKey: "AIzaSyAcJd2J-UKJ1dXqMI1HTf4BxmEftsuT2YU",
             authDomain: "e-kasir-5a8f8.firebaseapp.com",
@@ -2576,7 +2575,6 @@
                 if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
                 window.fbAuth = firebase.auth();
                 window.fbFs = firebase.firestore();
-                window.fbStorage = firebase.storage();
                 firebaseReady = true;
                 return true
             } catch (e) {
@@ -3796,116 +3794,89 @@ let pendingPurchaseBahanId = null;
             }
         }
 
-        function compressLogo(file, maxBytes = 200 * 1024) {
-            return new Promise((resolve, reject) => {
-                if (!file || !file.type || !file.type.startsWith('image/')) {
-                    return reject(new Error('File logo harus berupa gambar.'));
-                }
+        async function compressLogo(file, maxBytes = 200 * 1024) {
+            if (!file) throw new Error('Silakan pilih file logo.');
+            const type = String(file.type || '').toLowerCase();
+            const name = String(file.name || '').toLowerCase();
+            const isImage = type.startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(name);
+            if (!isImage) throw new Error('File logo harus berupa JPG, PNG, atau WebP.');
 
-                // Lebih stabil di Android/WebView: baca foto memakai Object URL,
-                // bukan FileReader pada file asli yang bisa berukuran sangat besar.
-                let objectUrl = '';
-                try {
-                    objectUrl = URL.createObjectURL(file);
-                } catch (e) {
-                    return reject(new Error('File logo tidak dapat dibuka.'));
-                }
-
-                const img = new Image();
-                const cleanup = () => {
-                    if (objectUrl) {
-                        try { URL.revokeObjectURL(objectUrl); } catch (e) {}
-                        objectUrl = '';
-                    }
-                };
-
-                img.onerror = () => {
-                    cleanup();
-                    reject(new Error('File gambar tidak dapat diproses. Pastikan JPG, PNG, atau WebP.'));
-                };
-
-                img.onload = () => {
-                    try {
-                        cleanup();
-                        const maxSide = 900;
-                        const iw = img.naturalWidth || img.width;
-                        const ih = img.naturalHeight || img.height;
-                        if (!iw || !ih) return reject(new Error('Ukuran gambar tidak valid.'));
-                        const scale = Math.min(1, maxSide / Math.max(iw, ih));
-                        const canvas = document.createElement('canvas');
-                        canvas.width = Math.max(1, Math.round(iw * scale));
-                        canvas.height = Math.max(1, Math.round(ih * scale));
-                        const ctx = canvas.getContext('2d', { alpha: false });
-                        if (!ctx) return reject(new Error('Browser tidak mendukung pemrosesan logo.'));
-                        ctx.fillStyle = '#ffffff';
-                        ctx.fillRect(0, 0, canvas.width, canvas.height);
-                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-                        let quality = 0.82;
-                        const make = () => {
-                            canvas.toBlob(blob => {
-                                if (!blob) return reject(new Error('Gagal mengompres logo.'));
-                                if (blob.size <= maxBytes) {
-                                    const fr = new FileReader();
-                                    fr.onerror = () => reject(new Error('Gagal membaca hasil kompresi logo.'));
-                                    fr.onload = () => resolve(String(fr.result || ''));
-                                    fr.readAsDataURL(blob);
-                                    return;
-                                }
-                                if (quality <= 0.35) {
-                                    return reject(new Error('Logo masih lebih dari 200 KB. Pilih gambar lain.'));
-                                }
-                                quality = Math.max(0.35, quality - 0.07);
-                                make();
-                            }, 'image/jpeg', quality);
-                        };
-                        make();
-                    } catch (e) {
-                        cleanup();
-                        reject(new Error(e?.message || 'Gagal memproses logo.'));
-                    }
-                };
-
-                img.src = objectUrl;
-            });
-        }
-
-        async function saveSettings() {
-            const oldLogo = db.settings?.logo || '';
-            const file = document.getElementById('shopLogo')?.files?.[0];
-
+            // Gunakan Blob URL terlebih dahulu agar tidak gagal membaca file besar.
+            const objectUrl = URL.createObjectURL(file);
             try {
-                let logo = oldLogo;
-                if (file) {
-                    toast('Mengompres logo...');
-                    logo = await compressLogo(file, 200 * 1024);
+                const img = new Image();
+                img.decoding = 'async';
+                await new Promise((resolve, reject) => {
+                    img.onload = resolve;
+                    img.onerror = () => reject(new Error('Browser tidak dapat membaca gambar ini.'));
+                    img.src = objectUrl;
+                });
+
+                const iw = img.naturalWidth || img.width;
+                const ih = img.naturalHeight || img.height;
+                if (!iw || !ih) throw new Error('Ukuran gambar tidak valid.');
+
+                // Maksimum 800 px agar hasil kecil dan ringan untuk Firestore.
+                let maxSide = 800;
+                let scale = Math.min(1, maxSide / Math.max(iw, ih));
+                let width = Math.max(1, Math.round(iw * scale));
+                let height = Math.max(1, Math.round(ih * scale));
+
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                if (!ctx) throw new Error('Browser tidak mendukung pemrosesan gambar.');
+
+                const makeBlob = (quality) => new Promise((resolve, reject) => {
+                    canvas.width = width;
+                    canvas.height = height;
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, width, height);
+                    ctx.imageSmoothingEnabled = true;
+                    ctx.imageSmoothingQuality = 'high';
+                    ctx.drawImage(img, 0, 0, width, height);
+                    canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Gagal membuat gambar hasil.')), 'image/jpeg', quality);
+                });
+
+                let blob = null;
+                // Turunkan kualitas terlebih dahulu. Jika masih besar, kecilkan dimensi.
+                for (let pass = 0; pass < 4 && !blob; pass++) {
+                    let quality = 0.82;
+                    for (let i = 0; i < 8; i++) {
+                        const candidate = await makeBlob(quality);
+                        if (candidate.size <= maxBytes) { blob = candidate; break; }
+                        quality -= 0.08;
+                    }
+                    if (!blob) {
+                        width = Math.max(240, Math.round(width * 0.75));
+                        height = Math.max(240, Math.round(height * 0.75));
+                    }
                 }
+                if (!blob || blob.size > maxBytes) throw new Error('Logo masih lebih dari 200 KB. Pilih gambar lain.');
 
-                db.settings = {
-                    name: shopName.value,
-                    phone: shopPhone.value,
-                    address: shopAddress.value,
-                    logo
-                };
-
-                save();
-                renderAll();
-                toast('Pengaturan tersimpan · logo maksimal 200 KB');
-            } catch (e) {
-                toast(e.message || 'Gagal menyimpan logo');
+                const dataUrl = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(String(reader.result || ''));
+                    reader.onerror = () => reject(new Error('Gagal membaca hasil kompresi logo.'));
+                    reader.readAsDataURL(blob);
+                });
+                if (!dataUrl) throw new Error('Gagal membuat logo.');
+                return { dataUrl, blob };
+            } finally {
+                try { URL.revokeObjectURL(objectUrl); } catch (e) {}
             }
         }
+
 
         function previewLogo(input) {
             const file = input?.files?.[0],
                 box = document.getElementById('logoPreview');
             if (!file || !box) return;
-            if (!file.type.startsWith('image/')) {
+            if (!(String(file.type || '').startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(file.name || ''))) {
                 input.value = '';
-                return toast('Pilih file gambar.');
+                return toast('Pilih file JPG, PNG, atau WebP.');
             }
-            compressLogo(file, 200 * 1024).then(data => {
-                box.innerHTML = `<img src="${data}" alt="Logo">`;
+            compressLogo(file, 200 * 1024).then(result => {
+                box.innerHTML = `<img src="${result.dataUrl}" alt="Logo">`;
                 toast('Preview logo siap · maksimal 200 KB');
             }).catch(err => {
                 input.value = '';
@@ -4070,4 +4041,34 @@ let pendingPurchaseBahanId = null;
     </script>
 </body>
 
-</html>
+</html>        async function saveSettings() {
+            const oldLogo = db.settings?.logo || '';
+            const file = document.getElementById('shopLogo')?.files?.[0];
+            try {
+                if (!currentUser || !firebaseReady) throw new Error('Belum terhubung ke Firebase. Login kembali lalu coba lagi.');
+                if (!isAdminClient()) throw new Error('Hanya Admin yang dapat mengubah pengaturan usaha.');
+
+                let logo = oldLogo;
+                if (file) {
+                    toast('Mengompres logo...');
+                    const result = await compressLogo(file, 200 * 1024);
+                    logo = result.dataUrl;
+                }
+
+                db.settings = {
+                    name: shopName.value,
+                    phone: shopPhone.value,
+                    address: shopAddress.value,
+                    logo: logo || ''
+                };
+
+                // 100% gratis: logo disimpan sebagai Data URL/Base64 di Firestore.
+                await fbFs.doc('toko/' + SHOP_ID + '/settings/profile').set(db.settings, { merge: true });
+                localStorage.setItem(KEY, JSON.stringify(db));
+                renderAll();
+                toast('Pengaturan tersimpan · logo maksimal 200 KB');
+            } catch (e) {
+                console.error('saveSettings:', e);
+                toast(e?.message || 'Gagal menyimpan pengaturan');
+            }
+        }
