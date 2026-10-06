@@ -979,6 +979,472 @@
                 border-radius: 20px
             }
         }
+    
+/* =========================================================
+   MOBILE & TABLET MODERN UI
+   Desktop layout is intentionally preserved.
+   ========================================================= */
+
+/* Tablet: give content more breathing room while keeping
+   the familiar side navigation. */
+@media (min-width:761px) and (max-width:1050px) {
+    .sidebar {
+        width: 86px;
+        padding: 16px 9px;
+        border-right: 1px solid rgba(255,255,255,.06);
+    }
+
+    .brand {
+        justify-content: center;
+        padding: 4px 4px 18px;
+    }
+
+    .brand div:last-child,
+    .nav button span:last-child {
+        display: none;
+    }
+
+    .nav button {
+        justify-content: center;
+        min-height: 50px;
+        padding: 10px;
+        border-radius: 14px;
+    }
+
+    .nav button span:first-child {
+        width: auto;
+        font-size: 21px;
+    }
+
+    .main {
+        margin-left: 86px;
+        width: calc(100% - 86px);
+        padding: 20px;
+    }
+
+    .topbar {
+        padding: 2px 2px 6px;
+    }
+
+    .cards {
+        gap: 12px;
+    }
+
+    .card {
+        border-radius: 20px;
+    }
+}
+
+/* Phones: replace the desktop left rail with a modern
+   bottom navigation and make the content full-width. */
+@media (max-width:760px) {
+    body {
+        background:
+            radial-gradient(circle at 90% 0%, rgba(166,106,55,.08), transparent 28%),
+            var(--bg);
+        overflow-x: hidden;
+    }
+
+    .app {
+        display: block;
+        min-height: 100dvh;
+    }
+
+    .sidebar {
+        position: fixed;
+        left: 10px;
+        right: 10px;
+        bottom: calc(8px + env(safe-area-inset-bottom));
+        top: auto;
+        width: auto;
+        height: 68px;
+        padding: 6px 5px;
+        border-radius: 20px;
+        background: rgba(17,24,39,.96);
+        box-shadow: 0 14px 35px rgba(15,23,42,.24);
+        z-index: 100;
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+    }
+
+    .brand {
+        display: none;
+    }
+
+    .nav {
+        height: 100%;
+        display: flex;
+        align-items: stretch;
+        gap: 3px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .nav::-webkit-scrollbar {
+        display: none;
+    }
+
+    .nav button {
+        flex: 0 0 74px;
+        min-width: 74px;
+        height: 56px;
+        padding: 5px 4px;
+        border-radius: 15px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        gap: 2px;
+        text-align: center;
+        color: #aeb7c7;
+        transition: background .18s ease, color .18s ease, transform .18s ease;
+    }
+
+    .nav button span:first-child {
+        width: auto;
+        font-size: 19px;
+        line-height: 22px;
+    }
+
+    .nav button span:last-child {
+        display: block;
+        font-size: 9.5px;
+        line-height: 12px;
+        white-space: nowrap;
+    }
+
+    .nav button.active {
+        background: #a66a37;
+        color: #fff;
+        box-shadow: 0 5px 14px rgba(166,106,55,.28);
+    }
+
+    .main {
+        margin-left: 0;
+        width: 100%;
+        max-width: none;
+        padding: max(12px, env(safe-area-inset-top)) 12px 96px;
+    }
+
+    .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        margin: -1px -12px 14px;
+        padding: 10px 12px 12px;
+        background: rgba(244,246,248,.92);
+        border-bottom: 1px solid rgba(229,231,235,.85);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        align-items: center;
+        gap: 10px;
+    }
+
+    .topbar h1 {
+        font-size: 21px;
+        letter-spacing: -.3px;
+    }
+
+    .topbar p {
+        font-size: 12px;
+        margin-top: 2px;
+    }
+
+    .actions {
+        gap: 6px;
+        align-items: center;
+    }
+
+    .actions .btn:not(.primary),
+    #userChip {
+        display: none;
+    }
+
+    #cloudStatus {
+        font-size: 10px;
+        white-space: nowrap;
+        max-width: 74px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .actions .btn.primary {
+        padding: 9px 11px;
+        border-radius: 12px;
+        font-size: 12px;
+        white-space: nowrap;
+        box-shadow: 0 5px 14px rgba(111,71,38,.18);
+    }
+
+    .cards {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+
+    .card {
+        border-radius: 18px;
+        box-shadow: 0 7px 22px rgba(17,24,39,.055);
+    }
+
+    .metric {
+        min-width: 0;
+        padding: 14px;
+        min-height: 126px;
+    }
+
+    .metric small {
+        display: block;
+        font-size: 11px;
+        line-height: 1.35;
+        min-height: 30px;
+    }
+
+    .metric strong {
+        font-size: 18px;
+        line-height: 1.2;
+        margin-top: 5px;
+        overflow-wrap: anywhere;
+    }
+
+    .metric .icon {
+        flex: 0 0 34px;
+        width: 34px;
+        height: 34px;
+        border-radius: 11px;
+        font-size: 17px;
+    }
+
+    .trend {
+        font-size: 10px;
+        line-height: 1.35;
+        margin-top: 7px;
+    }
+
+    .grid2,
+    .pos {
+        grid-template-columns: 1fr;
+        gap: 12px;
+        margin-top: 12px;
+    }
+
+    .section-title {
+        gap: 8px;
+        margin-bottom: 11px;
+    }
+
+    .section-title h2 {
+        font-size: 16px;
+    }
+
+    .section-title .btn,
+    .btn {
+        min-height: 40px;
+        padding: 9px 11px;
+        border-radius: 11px;
+    }
+
+    .toolbar {
+        gap: 8px;
+        margin-bottom: 11px;
+    }
+
+    .search {
+        min-width: 0;
+        width: 100%;
+        padding: 11px 12px;
+        border-radius: 12px;
+        font-size: 14px;
+    }
+
+    .product-grid {
+        grid-template-columns: repeat(2, minmax(0,1fr));
+        gap: 9px;
+    }
+
+    .product {
+        padding: 12px;
+        border-radius: 15px;
+    }
+
+    .product .emoji {
+        width: 42px;
+        height: 42px;
+        font-size: 23px;
+        border-radius: 12px;
+        margin-bottom: 9px;
+    }
+
+    .product h3 {
+        font-size: 13px;
+    }
+
+    .product p {
+        font-size: 11px;
+        margin-bottom: 9px;
+    }
+
+    .price {
+        font-size: 13px;
+    }
+
+    /* Prevent wide tables from breaking the page. */
+    .table {
+        min-width: 640px;
+    }
+
+    .card > div[style*="overflow:auto"] {
+        max-width: 100%;
+        overflow-x: auto !important;
+        border-radius: 10px;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .form-grid {
+        grid-template-columns: 1fr;
+        gap: 11px;
+    }
+
+    .full {
+        grid-column: auto;
+    }
+
+    .report-toolbar {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 9px;
+    }
+
+    .report-toolbar .field {
+        min-width: 0;
+    }
+
+    .report-actions {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+
+    .report-actions .btn {
+        width: 100%;
+        font-size: 12px;
+    }
+
+    /* POS/cart */
+    .cart {
+        position: static;
+        order: 2;
+    }
+
+    .categories {
+        padding-bottom: 2px;
+        margin-bottom: 10px;
+        scrollbar-width: none;
+    }
+
+    .categories::-webkit-scrollbar {
+        display: none;
+    }
+
+    .cat {
+        padding: 8px 11px;
+        border-radius: 10px;
+        font-size: 12px;
+    }
+
+    .modal {
+        padding: 8px;
+        align-items: flex-end;
+    }
+
+    .modal-box {
+        width: 100%;
+        max-height: calc(100dvh - 16px);
+        border-radius: 22px 22px 16px 16px;
+        padding: 17px;
+        box-shadow: 0 -10px 45px rgba(0,0,0,.20);
+    }
+
+    .modal-head h2 {
+        font-size: 17px;
+    }
+
+    .close {
+        width: 38px;
+        height: 38px;
+        padding: 0;
+        display: grid;
+        place-items: center;
+    }
+
+    .toast {
+        left: 12px;
+        right: 12px;
+        bottom: calc(86px + env(safe-area-inset-bottom));
+        text-align: center;
+        border-radius: 13px;
+    }
+}
+
+/* Small phones: optimize spacing without making text tiny. */
+@media (max-width:480px) {
+    .main {
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-bottom: 94px;
+    }
+
+    .topbar {
+        margin-left: -10px;
+        margin-right: -10px;
+        padding-left: 10px;
+        padding-right: 10px;
+    }
+
+    .topbar h1 {
+        font-size: 19px;
+    }
+
+    .cards {
+        gap: 8px;
+    }
+
+    .metric {
+        padding: 12px;
+        min-height: 118px;
+    }
+
+    .metric strong {
+        font-size: 17px;
+    }
+
+    .metric .icon {
+        width: 31px;
+        height: 31px;
+        flex-basis: 31px;
+        font-size: 15px;
+    }
+
+    .grid2 .card {
+        padding: 14px;
+    }
+
+    .section-title h2 {
+        font-size: 15px;
+    }
+
+    .nav button {
+        flex-basis: 70px;
+        min-width: 70px;
+    }
+
+    .nav button span:last-child {
+        font-size: 9px;
+    }
+}
+
     </style>
 </head>
 
