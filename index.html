@@ -2283,7 +2283,7 @@
                         </div>
                         <div class="icon">💸</div>
                     </div>
-                    <div class="card metric receivable-card">
+                    <div class="card metric receivable-card kasir-hidden-finance">
                         <div><small>Belum Dibayar</small><strong id="mPiutang">Rp0</strong>
                             <div class="trend receivable-trend" id="mPiutangCount">0 transaksi</div>
                         </div>
@@ -2478,7 +2478,7 @@
                             <button class="btn primary kasir-hidden-finance" onclick="printProfitLoss()">📄 Laba Rugi / PDF</button>
                             <button class="btn kasir-hidden-finance" onclick="printPurchases()">🛒 Pembelian / PDF</button>
                             <button class="btn kasir-hidden-finance" onclick="printStock()">📦 Stok / PDF</button>
-                            <button class="btn" onclick="exportCSV()">📊 Export CSV</button>
+                            <button class="btn kasir-hidden-finance" onclick="exportCSV()">📊 Export CSV</button>
                         </div>
                     </div>
                 </div>
@@ -2514,8 +2514,8 @@
                                     <th>Status</th>
                                     <th>Sisa</th>
                                     <th>Omzet</th>
-                                    <th>HPP</th>
-                                    <th>Laba</th>
+                                    <th class="kasir-hidden-finance">HPP</th>
+                                    <th class="kasir-hidden-finance">Laba</th>
                                     <th class="no-print">Aksi</th>
                                 </tr>
                             </thead>
@@ -2602,6 +2602,7 @@
         const AUTH_KEY = 'ekasir_firebase_session';
         let currentUser = null,
             currentRole = '',
+            currentUserName = '',
             KEY = BASE_KEY,
             db = {};
         let firebaseReady = false;
@@ -2753,11 +2754,18 @@
                         return;
                     }
                     currentRole = profile.role || '';
-                } else if (user.uid === 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2') currentRole = 'admin';
-                else currentRole = '';
+                    currentUserName = String(profile.name || profile.displayName || user.displayName || user.email || '').trim();
+                } else if (user.uid === 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2') {
+                    currentRole = 'admin';
+                    currentUserName = String(user.displayName || user.email || 'Admin').trim();
+                } else {
+                    currentRole = '';
+                    currentUserName = String(user.displayName || user.email || '').trim();
+                }
             } catch (e) {
                 console.error('load user profile:', e);
-                currentRole = user.uid === 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2' ? 'admin' : ''
+                currentRole = user.uid === 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2' ? 'admin' : '';
+                currentUserName = String(user.displayName || user.email || '').trim();
             }
             document.getElementById('authScreen').style.display = 'none';
             renderUserChip();
@@ -2960,6 +2968,7 @@
             localStorage.removeItem(AUTH_KEY);
             currentUser = null;
             currentRole = '';
+            currentUserName = '';
             KEY = BASE_KEY;
             db = blankDb();
             document.getElementById('authScreen').style.display = 'grid';
@@ -3461,7 +3470,9 @@ let pendingPurchaseBahanId = null;
                 pay: pendingCheckout.pay || 'Tunai',
                 paidAmount: Math.max(0, +paidAmount || 0),
                 change: Math.max(0, +change || 0),
-                status: status
+                status: status,
+                cashierUid: currentUser?.uid || '',
+                cashierName: currentUserName || currentUser?.displayName || currentUser?.email || 'Kasir'
             };
             db.transactions.push(record);
             save();
@@ -4083,6 +4094,7 @@ let pendingPurchaseBahanId = null;
         }
 
         function exportCSV() {
+            if (isKasirClient()) return toast('Export CSV tidak tersedia untuk Kasir.');
             const r = getReportRange();
             const rows = [
                 ['Tanggal', 'Waktu', 'Item', 'Pembayaran', 'Omzet', 'HPP', 'Laba'],
@@ -4123,6 +4135,7 @@ let pendingPurchaseBahanId = null;
         }
 
         function printProfitLoss() {
+            if (isKasirClient()) return toast('Laporan laba rugi hanya tersedia untuk Admin.');
             const r = getReportRange(),
                 tx = rangeTransactions(r.from, r.to),
                 ex = db.expenses.filter(x => inRange(x.date, r.from, r.to));
@@ -4138,6 +4151,7 @@ let pendingPurchaseBahanId = null;
         }
 
         function printPurchases() {
+            if (isKasirClient()) return toast('Laporan pembelian hanya tersedia untuk Admin.');
             const r = getReportRange(),
                 rows = rangePurchases(r.from, r.to).slice().sort((a, b) => String(a.date).localeCompare(String(b.date))),
                 total = rows.reduce((a, x) => a + (+x.total || 0), 0);
@@ -4147,6 +4161,7 @@ let pendingPurchaseBahanId = null;
         }
 
         function printStock() {
+            if (isKasirClient()) return toast('Laporan stok hanya tersedia untuk Admin.');
             const r = getReportRange(),
                 rows = db.bahan.map(b => ({
                     b,
@@ -4169,13 +4184,13 @@ let pendingPurchaseBahanId = null;
             if (!t) return;
             const items = t.items.map(i => `<div class="item"><div class="item-name">${i.name}</div><div class="row"><span>${i.qty} × ${rupiah(i.price)}</span><span>${rupiah(i.qty*i.price)}</span></div></div>`).join('');
             const logo = db.settings?.logo ? `<div class="t-logo"><img src="${db.settings.logo}" alt="Logo"></div>` : '';
-            const receipt = `<div class="thermal-receipt"><div class="t-logo">${logo}</div><h1>${db.settings?.name||'e-Kasir'}</h1><div class="center">${db.settings?.address||''}<br>${db.settings?.phone||''}</div><div class="line"></div><div>No. ${t.id} · ${formatDateID(t.date)} ${t.time}</div><div class="line"></div>${items}<div class="line"></div><div class="row total"><span>TOTAL</span><span>${rupiah(t.total)}</span></div><div class="row"><span>Pembayaran</span><span>${t.pay}</span></div><div class="line"></div><div class="center">Terima kasih</div></div>`;
+            const receipt = `<div class="thermal-receipt"><div class="t-logo">${logo}</div><h1>${db.settings?.name||'e-Kasir'}</h1><div class="center">${db.settings?.address||''}<br>${db.settings?.phone||''}</div><div class="line"></div><div>No. ${t.id} · ${formatDateID(t.date)} ${t.time}</div><div class="cashier">Kasir: ${t.cashierName || currentUserName || currentUser?.email || 'Kasir'}</div><div class="line"></div>${items}<div class="line"></div><div class="row total"><span>TOTAL</span><span>${rupiah(t.total)}</span></div><div class="row"><span>Pembayaran</span><span>${t.pay}</span></div><div class="line"></div><div class="center">Terima kasih</div></div>`;
             const w = window.open('', '_blank', 'width=420,height=700');
             if (!w) {
                 toast('Popup diblokir browser. Izinkan popup untuk mencetak.');
                 return
             }
-            w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Nota ${t.id}</title><style>@page{size:${width}mm auto;margin:2mm}html,body{margin:0;padding:0;background:#fff}body{font-family:Arial,sans-serif;color:#000}.thermal-receipt{width:${width-8}mm;margin:0 auto;font-size:${width===57?10:12}px}.t-logo{text-align:center;margin-bottom:4px}.t-logo img{max-width:${width===57?30:38}mm;max-height:18mm;object-fit:contain;filter:grayscale(1)}h1{font-size:16px;text-align:center;margin:0 0 2px}.center{text-align:center}.line{border-top:1px dashed #000;margin:6px 0}.row{display:flex;justify-content:space-between;gap:8px}.item{margin:5px 0}.item-name{font-weight:700}.total{font-size:14px;font-weight:700}</style></head><body>${receipt}</body></html>`);
+            w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Nota ${t.id}</title><style>@page{size:${width}mm auto;margin:2mm}html,body{margin:0;padding:0;background:#fff}body{font-family:Arial,sans-serif;color:#000}.thermal-receipt{width:${width-8}mm;margin:0 auto;font-size:${width===57?10:12}px}.t-logo{text-align:center;margin-bottom:4px}.t-logo img{max-width:${width===57?30:38}mm;max-height:18mm;object-fit:contain;filter:grayscale(1)}h1{font-size:16px;text-align:center;margin:0 0 2px}.center{text-align:center}.line{border-top:1px dashed #000;margin:6px 0}.row{display:flex;justify-content:space-between;gap:8px}.cashier{margin-top:2px}.item{margin:5px 0}.item-name{font-weight:700}.total{font-size:14px;font-weight:700}</style></head><body>${receipt}</body></html>`);
             w.document.close();
             w.focus();
             setTimeout(() => w.print(), 250);
