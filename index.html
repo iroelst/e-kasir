@@ -3144,7 +3144,7 @@ let pendingPurchaseBahanId = null;
 
             if (!Array.isArray(menuRecipeDraft)) menuRecipeDraft = [];
             const options = db.bahan.map(b =>
-                `<option value=\"${b.id}\">${b.name} — ${formatQty(b.content)} ${b.unit} · ${rupiah(unitCost(b))}/${b.unit}</option>`
+                `<option value=\"${b.id}\">${b.name}</option>`
             ).join('');
 
             box.innerHTML = menuRecipeDraft.length ? menuRecipeDraft.map((row, i) => {
@@ -3902,13 +3902,13 @@ let pendingPurchaseBahanId = null;
             if (editId && !editing) return toast('Data pembelian tidak ditemukan.');
             if (!db.bahan.length) return openModal('Pembelian Bahan', `<div class="empty">Belum ada bahan yang terdaftar.<div style="margin-top:12px"><button class="btn primary" onclick="openBahanForPurchase()">＋ Tambah Bahan Baru</button></div></div>`);
             const selectedId = editing ? editing.bahanId : pendingPurchaseBahanId;
-            const opts = db.bahan.map(b => `<option value="${b.id}" ${selectedId===b.id?'selected':''}>${b.name} — ${formatQty(b.content)} ${b.unit}/kemasan — ${rupiah(b.cost)}</option>`).join('');
+            const opts = db.bahan.map(b => `<option value="${b.id}" ${selectedId===b.id?'selected':''}>${b.name}</option>`).join('');
             const defaultDate = editing?.date || ((today() >= r.from && today() <= r.to) ? today() : r.from);
             openModal(editing ? 'Edit Pembelian Bahan' : 'Form Pembelian Bahan', `<p style="margin-top:0;color:var(--muted);font-size:13px">${editing ? 'Perubahan akan memperbarui riwayat pembelian dan perhitungan stok yang berkaitan.' : 'Gunakan form ini setiap kali membeli bahan. Jumlah diisi dalam <b>kemasan</b>; sistem otomatis menghitung isi yang masuk, menambah Tampil Stok, dan mencatat Riwayat Pembelian.'}</p><div class="form-grid"><div class="field full"><label>BAHAN</label><select id="pBahan" onchange="updatePurchasePreview()">${opts}</select><button type="button" class="btn" style="margin-top:8px" onclick="openBahanForPurchase()">＋ Tambah Bahan Baru</button></div><div class="field"><label>TANGGAL PEMBELIAN</label><input id="pDate" type="date" value="${defaultDate}"></div><div class="field"><label>JUMLAH KEMASAN</label><input id="pPackages" type="number" step="1" min="1" value="${editing?.packages ?? 1}" oninput="updatePurchasePreview()"></div><div class="field"><label>HARGA / KEMASAN</label><input id="pCost" type="number" min="0" value="${editing?.cost ?? ''}" oninput="updatePurchasePreview()"></div><div class="field"><label>ISI MASUK</label><input id="pQty" readonly></div><div class="field full"><label>KETERANGAN</label><input id="pNote" value="${editing?.note || ''}" placeholder="Contoh: pembelian stok"></div></div><div id="purchasePreview" style="margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:var(--muted)"></div><button class="btn primary" style="margin-top:15px" onclick="savePurchase(${editId || 0})">${editing ? 'Simpan Perubahan' : 'Simpan Pembelian'}</button>`);
             const b = db.bahan.find(x => x.id === selectedId) || db.bahan[0];
             if (pendingPurchaseBahanId !== null) pendingPurchaseBahanId = null;
             const pCostEl = document.getElementById('pCost');
-            if (pCostEl) pCostEl.value = b.cost;
+            if (pCostEl) pCostEl.value = editing ? editing.cost : b.cost;
             updatePurchasePreview();
         }
 
