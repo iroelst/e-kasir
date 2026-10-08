@@ -2236,7 +2236,8 @@
                 <button class="active" data-page="dashboard"><span>▦</span><span>Dashboard</span></button>
                 <button data-page="kasir"><span>🧾</span><span>Kasir</span></button>
                 <button data-page="menu"><span>☕</span><span>Menu & Resep</span></button>
-                <button data-page="bahan"><span>📦</span><span>Pembelian & Stok</span></button>
+                <button data-page="pembelian"><span>🛒</span><span>Pembelian</span></button>
+                <button data-page="stok"><span>📦</span><span>Stok</span></button>
                 <button data-page="pengeluaran"><span>💸</span><span>Pengeluaran</span></button>
                 <button data-page="laporan"><span>📊</span><span>Laporan</span></button>
                 <button data-page="pengaturan"><span>⚙️</span><span>Pengaturan</span></button>
@@ -2296,7 +2297,7 @@
                     </div>
                     <div class="card">
                         <div class="section-title">
-                            <h2>Stok Menipis</h2><button class="btn" onclick="go('bahan')">Kelola</button>
+                            <h2>Stok Menipis</h2><button class="btn" onclick="go('stok')">Kelola</button>
                         </div>
                         <div id="lowStock"></div>
                     </div>
@@ -2350,13 +2351,39 @@
                 </div>
             </section>
 
-            <section id="bahan" class="page">
+            <section id="pembelian" class="page">
+                <div class="card" style="margin-top:18px">
+                    <div class="section-title">
+                        <div>
+                            <h2>Riwayat Pembelian</h2><small style="color:var(--muted)">Kelola dan lihat seluruh pembelian bahan pada periode yang dipilih.</small>
+                        </div><button class="btn primary" onclick="openPurchaseModal()">🛒 Pembelian Bahan</button>
+                    </div>
+                    <div style="overflow:auto">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Tanggal</th>
+                                    <th>Bahan</th>
+                                    <th>Jumlah Kemasan</th>
+                                    <th>Isi Masuk</th>
+                                    <th>Harga Kemasan</th>
+                                    <th>Total</th>
+                                    <th>Keterangan</th>
+                                </tr>
+                            </thead>
+                            <tbody id="purchaseTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <section id="stok" class="page">
                 <div class="card">
                     <div class="section-title">
                         <div>
-                            <h2>Stok & Pembelian Bahan</h2><small style="color:var(--muted)">Stok awal diisi saat mulai. Pembelian menambah stok otomatis dan masuk ke riwayat.</small>
+                            <h2>Stok Bahan</h2><small style="color:var(--muted)">Kelola stok awal, stok akhir, pemakaian produksi, dan kondisi stok bahan.</small>
                         </div>
-                        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="openOpeningModal()">📦 Stok Awal</button><button class="btn primary" onclick="openPurchaseModal()">🛒 Pembelian Bahan</button></div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" onclick="openOpeningModal()">📦 Stok Awal</button></div>
                     </div>
                     <div class="form-grid" style="margin-bottom:15px">
                         <div class="field"><label>DARI TANGGAL</label><input id="stockFrom" type="date" onchange="changeStockRange()"></div>
@@ -2405,29 +2432,6 @@
                                 </tr>
                             </thead>
                             <tbody id="bahanTable"></tbody>
-                        </table>
-                    </div>
-                </div>
-                <div class="card" style="margin-top:18px">
-                    <div class="section-title">
-                        <div>
-                            <h2>Riwayat Pembelian</h2><small style="color:var(--muted)">Pembelian yang disimpan dari form Pembelian Bahan tampil di sini.</small>
-                        </div>
-                    </div>
-                    <div style="overflow:auto">
-                        <table class="table">
-                            <thead>
-                                <tr>
-                                    <th>Tanggal</th>
-                                    <th>Bahan</th>
-                                    <th>Jumlah Kemasan</th>
-                                    <th>Isi Masuk</th>
-                                    <th>Harga Kemasan</th>
-                                    <th>Total</th>
-                                    <th>Keterangan</th>
-                                </tr>
-                            </thead>
-                            <tbody id="purchaseTable"></tbody>
                         </table>
                     </div>
                 </div>
@@ -3084,7 +3088,7 @@ let pendingPurchaseBahanId = null;
             const box = document.getElementById('recipeRows');
             if (!box) return;
             if (!db.bahan.length) {
-                box.innerHTML = '<div class=\"empty\">Belum ada bahan. Tambahkan bahan terlebih dahulu melalui menu Pembelian & Stok.</div>';
+                box.innerHTML = '<div class=\"empty\">Belum ada bahan. Tambahkan bahan terlebih dahulu melalui menu Stok.</div>';
                 const hppEl = document.getElementById('fHpp');
                 const fcEl = document.getElementById('foodCostPreview');
                 if (hppEl) hppEl.value = '0';
@@ -3165,7 +3169,8 @@ let pendingPurchaseBahanId = null;
                 dashboard: 'Dashboard',
                 kasir: 'Kasir',
                 menu: 'Menu & Resep',
-                bahan: 'Pembelian & Stok',
+                pembelian: 'Pembelian',
+                stok: 'Stok',
                 pengeluaran: 'Pengeluaran',
                 laporan: 'Laporan',
                 pengaturan: 'Pengaturan'
