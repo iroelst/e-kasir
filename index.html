@@ -2570,10 +2570,33 @@
                 <div class="card settings-auth" id="userManagementCard">
                     <div class="section-title">
                         <h2>Manajemen User</h2>
-                        <button class="btn primary" onclick="openAddKasirModal()">+ Tambah Kasir</button>
                     </div>
-                    <div class="hint">Admin dapat membuat akun Kasir baru. Akun Kasir hanya memiliki akses Dashboard, Kasir, dan Laporan.</div>
-                    <div id="kasirUserList" style="margin-top:14px"></div>
+                    <div class="hint">Kelola nama pengguna yang tercetak pada nota. Nama Admin dan Kasir dapat diedit dari sini.</div>
+
+                    <div style="margin-top:16px;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--soft)">
+                        <div class="section-title" style="margin-bottom:10px">
+                            <h3 style="margin:0">👤 Admin</h3>
+                        </div>
+                        <div class="form-grid">
+                            <div class="field full">
+                                <label>NAMA ADMIN</label>
+                                <input id="adminNameSetting" type="text" placeholder="Nama Admin">
+                            </div>
+                            <div class="field full">
+                                <label>EMAIL ADMIN</label>
+                                <input id="adminEmailSetting" type="email" readonly>
+                            </div>
+                        </div>
+                        <button class="btn primary" style="margin-top:12px" onclick="saveAdminName()">Simpan Nama Admin</button>
+                    </div>
+
+                    <div style="margin-top:16px;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--soft)">
+                        <div class="section-title" style="margin-bottom:10px">
+                            <h3 style="margin:0">👥 Kasir</h3>
+                            <button class="btn primary" onclick="openAddKasirModal()">+ Tambah Kasir</button>
+                        </div>
+                        <div id="kasirUserList"></div>
+                    </div>
                 </div>
                 <div class="card" style="margin-top:18px">
                     <div class="section-title">
@@ -2612,6 +2635,7 @@
         const AUTH_KEY = 'ekasir_firebase_session';
         let currentUser = null,
             currentRole = '',
+            currentUserName = '',
             KEY = BASE_KEY,
             db = {};
         let firebaseReady = false;
@@ -2741,6 +2765,7 @@
         }
         async function finishFirebaseLogin(user) {
             currentUser = user;
+            currentUserName = user.displayName || (user.email ? user.email.split('@')[0] : '') || 'User';
             KEY = BASE_KEY + '_' + user.uid;
             localStorage.setItem(AUTH_KEY, JSON.stringify({
                 uid: user.uid,
@@ -2763,6 +2788,7 @@
                         return;
                     }
                     currentRole = profile.role || '';
+                    currentUserName = String(profile.name || profile.displayName || currentUserName || 'User').trim() || 'User';
                 } else if (user.uid === 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2') currentRole = 'admin';
                 else currentRole = '';
             } catch (e) {
@@ -2949,6 +2975,7 @@
             localStorage.removeItem(AUTH_KEY);
             currentUser = null;
             currentRole = '';
+            currentUserName = '';
             KEY = BASE_KEY;
             db = blankDb();
             document.getElementById('authScreen').style.display = 'grid';
@@ -3451,7 +3478,9 @@ let pendingPurchaseBahanId = null;
                 pay: pendingCheckout.pay || 'Tunai',
                 paidAmount: Math.max(0, +paidAmount || 0),
                 change: Math.max(0, +change || 0),
-                status: status
+                status: status,
+                cashierUid: currentUser?.uid || '',
+                cashierName: currentUserName || currentUser?.displayName || (currentUser?.email ? currentUser.email.split('@')[0] : '') || (isAdminClient() ? 'Admin' : 'Kasir')
             };
             db.transactions.push(record);
             save();
@@ -4159,7 +4188,7 @@ let pendingPurchaseBahanId = null;
             if (!t) return;
             const items = t.items.map(i => `<div class="item"><div class="item-name">${i.name}</div><div class="row"><span>${i.qty} × ${rupiah(i.price)}</span><span>${rupiah(i.qty*i.price)}</span></div></div>`).join('');
             const logo = db.settings?.logo ? `<div class="t-logo"><img src="${db.settings.logo}" alt="Logo"></div>` : '';
-            const receipt = `<div class="thermal-receipt"><div class="t-logo">${logo}</div><h1>${db.settings?.name||'e-Kasir'}</h1><div class="center">${db.settings?.address||''}<br>${db.settings?.phone||''}</div><div class="line"></div><div>No. ${t.id} · ${formatDateID(t.date)} ${t.time}</div><div class="line"></div>${items}<div class="line"></div><div class="row total"><span>TOTAL</span><span>${rupiah(t.total)}</span></div><div class="row"><span>Pembayaran</span><span>${t.pay}</span></div><div class="line"></div><div class="center">Terima kasih</div></div>`;
+            const receipt = `<div class="thermal-receipt"><div class="t-logo">${logo}</div><h1>${db.settings?.name||'e-Kasir'}</h1><div class="center">${db.settings?.address||''}<br>${db.settings?.phone||''}</div><div class="line"></div><div>No. ${t.id} · ${formatDateID(t.date)} ${t.time}</div><div>Kasir: ${t.cashierName || 'Kasir'}</div><div class="line"></div>${items}<div class="line"></div><div class="row total"><span>TOTAL</span><span>${rupiah(t.total)}</span></div><div class="row"><span>Pembayaran</span><span>${t.pay}</span></div><div class="line"></div><div class="center">Terima kasih</div></div>`;
             const w = window.open('', '_blank', 'width=420,height=700');
             if (!w) {
                 toast('Popup diblokir browser. Izinkan popup untuk mencetak.');
@@ -4193,10 +4222,41 @@ let pendingPurchaseBahanId = null;
 
 
 
-        function ensureAdminUserManagement() {
+        async function ensureAdminUserManagement() {
             const card = document.getElementById('userManagementCard');
             if (card) card.style.display = isAdminClient() ? '' : 'none';
-            if (isAdminClient()) renderKasirUsers();
+            if (!isAdminClient()) return;
+
+            const nameInput = document.getElementById('adminNameSetting');
+            const emailInput = document.getElementById('adminEmailSetting');
+            if (emailInput) emailInput.value = currentUser?.email || '';
+            if (nameInput) nameInput.value = currentUserName || currentUser?.displayName || '';
+            await renderKasirUsers();
+        }
+
+        async function saveAdminName() {
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengubah nama Admin.');
+            if (!firebaseReady || !currentUser) return toast('Firebase belum siap. Login kembali.');
+            const input = document.getElementById('adminNameSetting');
+            const name = String(input?.value || '').trim();
+            if (!name) return toast('Nama Admin wajib diisi.');
+            try {
+                await fbFs.doc('users/' + currentUser.uid).set({
+                    uid: currentUser.uid,
+                    name,
+                    email: currentUser.email || '',
+                    role: 'admin',
+                    disabled: false,
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+                currentUserName = name;
+                renderUserChip();
+                renderAll();
+                toast('Nama Admin berhasil disimpan.');
+            } catch (e) {
+                console.error('saveAdminName:', e);
+                toast(e?.message || 'Gagal menyimpan nama Admin.');
+            }
         }
 
         async function getKasirUsers() {
@@ -4222,6 +4282,7 @@ let pendingPurchaseBahanId = null;
                     return `<div class="user-row">
                         <div class="user-info"><strong>${escapeHtml(name)}</strong><small>${escapeHtml(email)} · ${active ? 'Aktif' : 'Dinonaktifkan'}</small></div>
                         <div class="user-actions">
+                            <button class="btn" onclick="openEditKasirModal('${u.id}')">Edit Nama</button>
                             <button class="btn" onclick="toggleKasirUser('${u.id}',${active})">${active ? 'Nonaktifkan' : 'Aktifkan'}</button>
                         </div>
                     </div>`;
@@ -4287,6 +4348,45 @@ let pendingPurchaseBahanId = null;
                 toast(msg);
             } finally {
                 if (btn) { btn.disabled = false; btn.textContent = 'Buat Akun Kasir'; }
+            }
+        }
+
+        async function openEditKasirModal(uid) {
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengubah user.');
+            try {
+                const snap = await fbFs.doc('users/' + uid).get();
+                if (!snap.exists) return toast('User Kasir tidak ditemukan.');
+                const u = snap.data() || {};
+                openModal('Edit Nama Kasir', `<form onsubmit="saveKasirName(event, '${uid}')">
+                    <div class="form-grid">
+                        <div class="field full"><label>NAMA KASIR</label><input id="editKasirName" required value="${escapeHtml(u.name || u.nama || '')}" placeholder="Nama Kasir"></div>
+                        <div class="field full"><label>EMAIL</label><input value="${escapeHtml(u.email || '')}" readonly></div>
+                    </div>
+                    <button id="saveEditKasirBtn" class="btn primary" style="width:100%;margin-top:15px" type="submit">Simpan Nama</button>
+                </form>`);
+            } catch (e) {
+                console.error('openEditKasirModal:', e);
+                toast(e?.message || 'Gagal membuka data Kasir.');
+            }
+        }
+
+        async function saveKasirName(ev, uid) {
+            ev.preventDefault();
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengubah user.');
+            const name = String(document.getElementById('editKasirName')?.value || '').trim();
+            if (!name) return toast('Nama Kasir wajib diisi.');
+            const btn = document.getElementById('saveEditKasirBtn');
+            if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan...'; }
+            try {
+                await fbFs.doc('users/' + uid).set({ name, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+                closeModal();
+                await renderKasirUsers();
+                toast('Nama Kasir berhasil diperbarui.');
+            } catch (e) {
+                console.error('saveKasirName:', e);
+                toast(e?.message || 'Gagal menyimpan nama Kasir.');
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = 'Simpan Nama'; }
             }
         }
 
