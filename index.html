@@ -2387,6 +2387,7 @@
                                     <th>Harga Kemasan</th>
                                     <th>Total</th>
                                     <th>Keterangan</th>
+                                    <th></th>
                                 </tr>
                             </thead>
                             <tbody id="purchaseTable"></tbody>
@@ -2669,6 +2670,12 @@
             }));
             db.stockPeriods = db.stockPeriods && typeof db.stockPeriods === 'object' ? db.stockPeriods : {};
             db.nextId = Number.isFinite(+db.nextId) ? +db.nextId : 1;
+            // Migrasi data lama: setiap pengeluaran harus memiliki ID agar bisa diedit/hapus dengan aman.
+            let maxEntityId = Math.max(0, ...[].concat(db.menus, db.bahan, db.transactions, db.purchases, db.expenses, db.stockMoves).map(x => +x?.id || 0));
+            db.expenses.forEach(e => {
+                if (!Number.isFinite(+e.id) || +e.id <= 0) e.id = ++maxEntityId;
+            });
+            db.nextId = Math.max(db.nextId, maxEntityId + 1);
             if (!db.settings || typeof db.settings !== 'object') db.settings = {
                 name: 'KopiKasir Coffee',
                 phone: '',
@@ -3284,7 +3291,7 @@ let pendingPurchaseBahanId = null;
 
         function renderProducts() {
             let q = (document.getElementById('posSearch')?.value || '').toLowerCase();
-            let a = db.menus.filter(m => m.active && (activeCat === 'Semua' || m.cat === activeCat) && m.name.toLowerCase().includes(q));
+            let a = db.menus.filter(m => m.active !== false && (activeCat === 'Semua' || m.cat === activeCat) && m.name.toLowerCase().includes(q));
             products.innerHTML = a.map(m => `<div class="product"><div class="emoji">${m.emoji||'☕'}</div><h3>${m.name}</h3><p>${m.cat}</p><div class="product-price">${rupiah(m.price)}</div><button class="mini" onclick="addCart(${m.id})">＋ TAMBAH</button></div>`).join('') || '<div class="empty" style="grid-column:1/-1">Menu tidak ditemukan.</div>'
         }
 
@@ -3577,8 +3584,23 @@ let pendingPurchaseBahanId = null;
 
         function renderMenuTable() {
             let q = (menuSearch.value || '').toLowerCase();
-            let a = db.menus.filter(m => m.name.toLowerCase().includes(q));
-            menuTable.innerHTML = a.map(m => `<tr><td><b>${m.emoji||'☕'} ${m.name}</b></td><td>${m.cat}</td><td>${rupiah(m.price)}</td><td>${rupiah(m.hpp)}</td><td><b>${rupiah(m.price-m.hpp)}</b></td><td><span class="badge ${m.active?'ok':''}">${m.active?'Aktif':'Nonaktif'}</span></td><td><button class="btn" onclick="editMenu(${m.id})">Edit</button></td></tr>`).join('')
+            let a = db.menus.filter(m => String(m.name || '').toLowerCase().includes(q));
+            menuTable.innerHTML = a.map(m => `<tr><td><b>${m.emoji||'☕'} ${m.name}</b></td><td>${m.cat}</td><td>${rupiah(m.price)}</td><td>${rupiah(m.hpp)}</td><td><b>${rupiah(m.price-m.hpp)}</b></td><td><span class="badge ${m.active !== false?'ok':''}">${m.active !== false?'Aktif':'Nonaktif'}</span></td><td><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn" title="Edit menu" onclick="editMenu(${m.id})">✏️ Edit</button><button class="btn" title="${m.active !== false?'Nonaktifkan':'Aktifkan'} menu" onclick="toggleMenuActive(${m.id})">${m.active !== false?'Nonaktifkan':'Aktifkan'}</button></div></td></tr>`).join('') || '<tr><td colspan="7"><div class="empty">Belum ada menu.</div></td></tr>'
+        }
+
+        function toggleMenuActive(id) {
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengubah status menu.');
+            const m = db.menus.find(x => x.id === id);
+            if (!m) return toast('Menu tidak ditemukan.');
+            const willDeactivate = m.active !== false;
+            const message = willDeactivate
+                ? `Nonaktifkan menu "${m.name}"? Menu akan hilang dari pilihan Kasir, tetapi data transaksi lama dan resep tetap aman.`
+                : `Aktifkan kembali menu "${m.name}" agar tampil di Kasir?`;
+            if (!confirm(message)) return;
+            m.active = !willDeactivate;
+            save();
+            renderAll();
+            toast(m.active ? `Menu "${m.name}" diaktifkan.` : `Menu "${m.name}" dinonaktifkan. Data transaksi lama tetap tersimpan.`);
         }
 
         function unitCost(b) {
@@ -3613,7 +3635,7 @@ let pendingPurchaseBahanId = null;
             stockUsageTotal.textContent = rupiah(usageTotal);
             stockEndingTotal.textContent = rupiah(endingTotal);
             stockPeriodStatus.textContent = `Periode ${r.from.split('-').reverse().join('/')} – ${r.to.split('-').reverse().join('/')} · Stok akhir dihitung otomatis`;
-            purchaseTable.innerHTML = rangePurchases(r.from, r.to).slice().reverse().map(m => `<tr><td>${m.date}</td><td><b>${m.bahanName}</b></td><td>${formatQty(m.packages||0)} kemasan</td><td>${formatQty(m.qty)} ${m.unit}</td><td>${rupiah(m.cost)}</td><td>${rupiah(m.total)}</td><td>${m.note||'-'}</td></tr>`).join('') || '<tr><td colspan="7"><div class="empty">Belum ada pembelian pada periode ini.</div></td></tr>';
+            purchaseTable.innerHTML = rangePurchases(r.from, r.to).slice().reverse().map(m => `<tr><td>${m.date}</td><td><b>${m.bahanName}</b></td><td>${formatQty(m.packages||0)} kemasan</td><td>${formatQty(m.qty)} ${m.unit}</td><td>${rupiah(m.cost)}</td><td>${rupiah(m.total)}</td><td>${m.note||'-'}</td><td><div style="display:flex;gap:6px"><button class="btn" title="Edit pembelian" onclick="openPurchaseModal(${m.id})">✏️ Edit</button><button class="btn" title="Hapus pembelian" onclick="deletePurchase(${m.id})">🗑️ Hapus</button></div></td></tr>`).join('') || '<tr><td colspan="8"><div class="empty">Belum ada pembelian pada periode ini.</div></td></tr>';
             document.getElementById('stockFrom').value = r.from;
             document.getElementById('stockTo').value = r.to;
         }
@@ -3664,7 +3686,7 @@ let pendingPurchaseBahanId = null;
         }
 
         function renderExpenses() {
-            expenseTable.innerHTML = db.expenses.slice().reverse().map((e, i) => `<tr><td>${e.date}</td><td>${e.cat}</td><td>${e.note}</td><td><b>${rupiah(e.amount)}</b></td><td><button class="btn" onclick="deleteExpense(${db.expenses.length-1-i})">Hapus</button></td></tr>`).join('') || '<tr><td colspan="5"><div class="empty">Belum ada pengeluaran.</div></td></tr>'
+            expenseTable.innerHTML = db.expenses.slice().reverse().map(e => `<tr><td>${e.date}</td><td>${e.cat}</td><td>${e.note}</td><td><b>${rupiah(e.amount)}</b></td><td><div style="display:flex;gap:6px"><button class="btn" title="Edit pengeluaran" onclick="openExpenseModal(${e.id})">✏️ Edit</button><button class="btn" title="Hapus pengeluaran" onclick="deleteExpense(${e.id})">🗑️ Hapus</button></div></td></tr>`).join('') || '<tr><td colspan="5"><div class="empty">Belum ada pengeluaran.</div></td></tr>'
         }
 
         function getReportRange() {
@@ -3776,6 +3798,7 @@ let pendingPurchaseBahanId = null;
             if (!fName.value.trim()) return toast('Nama menu wajib diisi');
             if (!+fPrice.value) return toast('Harga jual wajib diisi');
             if (!valid.length) return toast('Tambahkan minimal satu bahan ke resep');
+            const oldMenu = id ? db.menus.find(m => m.id === id) : null;
             let x = {
                 id: id || db.nextId++,
                 name: fName.value.trim(),
@@ -3783,7 +3806,7 @@ let pendingPurchaseBahanId = null;
                 price: +fPrice.value,
                 hpp,
                 emoji: fEmoji.value || ({Minuman:'🥤',Makanan:'🍜',Snack:'🍟'}[fCat.value] || '🥤'),
-                active: true
+                active: oldMenu ? oldMenu.active !== false : true
             };
             if (id) db.menus = db.menus.map(m => m.id === id ? x : m);
             else db.menus.push(x);
@@ -3872,13 +3895,16 @@ let pendingPurchaseBahanId = null;
             openBahanModal();
         }
 
-        function openPurchaseModal() {
+        function openPurchaseModal(editId = null) {
+            if (editId && !isAdminClient()) return toast('Hanya Admin yang dapat mengedit pembelian.');
             const r = getRange();
+            const editing = editId ? db.purchases.find(x => x.id === editId) : null;
+            if (editId && !editing) return toast('Data pembelian tidak ditemukan.');
             if (!db.bahan.length) return openModal('Pembelian Bahan', `<div class="empty">Belum ada bahan yang terdaftar.<div style="margin-top:12px"><button class="btn primary" onclick="openBahanForPurchase()">＋ Tambah Bahan Baru</button></div></div>`);
-            const selectedId = pendingPurchaseBahanId;
+            const selectedId = editing ? editing.bahanId : pendingPurchaseBahanId;
             const opts = db.bahan.map(b => `<option value="${b.id}" ${selectedId===b.id?'selected':''}>${b.name} — ${formatQty(b.content)} ${b.unit}/kemasan — ${rupiah(b.cost)}</option>`).join('');
-            const defaultDate = (today() >= r.from && today() <= r.to) ? today() : r.from;
-            openModal('Form Pembelian Bahan', `<p style="margin-top:0;color:var(--muted);font-size:13px">Gunakan form ini setiap kali membeli bahan. Jumlah diisi dalam <b>kemasan</b>; sistem otomatis menghitung isi yang masuk, menambah Tampil Stok, dan mencatat Riwayat Pembelian.</p><div class="form-grid"><div class="field full"><label>BAHAN</label><select id="pBahan" onchange="updatePurchasePreview()">${opts}</select><button type="button" class="btn" style="margin-top:8px" onclick="openBahanForPurchase()">＋ Tambah Bahan Baru</button></div><div class="field"><label>TANGGAL PEMBELIAN</label><input id="pDate" type="date" value="${defaultDate}" min="${r.from}" max="${r.to}"></div><div class="field"><label>JUMLAH KEMASAN</label><input id="pPackages" type="number" step="1" min="1" value="1" oninput="updatePurchasePreview()"></div><div class="field"><label>HARGA / KEMASAN</label><input id="pCost" type="number" min="0" oninput="updatePurchasePreview()"></div><div class="field"><label>ISI MASUK</label><input id="pQty" readonly></div><div class="field full"><label>KETERANGAN</label><input id="pNote" placeholder="Contoh: pembelian stok"></div></div><div id="purchasePreview" style="margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:var(--muted)"></div><button class="btn primary" style="margin-top:15px" onclick="savePurchase()">Simpan Pembelian</button>`);
+            const defaultDate = editing?.date || ((today() >= r.from && today() <= r.to) ? today() : r.from);
+            openModal(editing ? 'Edit Pembelian Bahan' : 'Form Pembelian Bahan', `<p style="margin-top:0;color:var(--muted);font-size:13px">${editing ? 'Perubahan akan memperbarui riwayat pembelian dan perhitungan stok yang berkaitan.' : 'Gunakan form ini setiap kali membeli bahan. Jumlah diisi dalam <b>kemasan</b>; sistem otomatis menghitung isi yang masuk, menambah Tampil Stok, dan mencatat Riwayat Pembelian.'}</p><div class="form-grid"><div class="field full"><label>BAHAN</label><select id="pBahan" onchange="updatePurchasePreview()">${opts}</select><button type="button" class="btn" style="margin-top:8px" onclick="openBahanForPurchase()">＋ Tambah Bahan Baru</button></div><div class="field"><label>TANGGAL PEMBELIAN</label><input id="pDate" type="date" value="${defaultDate}"></div><div class="field"><label>JUMLAH KEMASAN</label><input id="pPackages" type="number" step="1" min="1" value="${editing?.packages ?? 1}" oninput="updatePurchasePreview()"></div><div class="field"><label>HARGA / KEMASAN</label><input id="pCost" type="number" min="0" value="${editing?.cost ?? ''}" oninput="updatePurchasePreview()"></div><div class="field"><label>ISI MASUK</label><input id="pQty" readonly></div><div class="field full"><label>KETERANGAN</label><input id="pNote" value="${editing?.note || ''}" placeholder="Contoh: pembelian stok"></div></div><div id="purchasePreview" style="margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:var(--muted)"></div><button class="btn primary" style="margin-top:15px" onclick="savePurchase(${editId || 0})">${editing ? 'Simpan Perubahan' : 'Simpan Pembelian'}</button>`);
             const b = db.bahan.find(x => x.id === selectedId) || db.bahan[0];
             if (pendingPurchaseBahanId !== null) pendingPurchaseBahanId = null;
             const pCostEl = document.getElementById('pCost');
@@ -3901,76 +3927,102 @@ let pendingPurchaseBahanId = null;
             document.getElementById('purchasePreview').textContent = `Total pembelian: ${rupiah(n*price)} · Stok bertambah ${formatQty(qty)} ${b.unit}`;
         }
 
-        function savePurchase() {
-            const pBahanEl = document.getElementById('pBahan');
-            const pDateEl = document.getElementById('pDate');
-            const pPackagesEl = document.getElementById('pPackages');
-            const pCostEl = document.getElementById('pCost');
-            const pNoteEl = document.getElementById('pNote');
-            const b = db.bahan.find(x => x.id === +(pBahanEl?.value || 0)),
-                date = pDateEl?.value || '',
-                n = +(pPackagesEl?.value || 0),
-                price = +(pCostEl?.value || 0),
-                r = getRange();
+        function recalculateStockPeriods() {
+            const periods = Object.values(db.stockPeriods || {}).filter(p => p && p.from && p.to).sort((a, b) => String(a.from).localeCompare(String(b.from)) || String(a.to).localeCompare(String(b.to)));
+            let previousEnding = {};
+            periods.forEach(p => {
+                if (!p.openingDate && Object.keys(previousEnding).length) p.opening = JSON.parse(JSON.stringify(previousEnding));
+                p.opening = p.opening && typeof p.opening === 'object' ? p.opening : {};
+                const ending = {};
+                db.bahan.forEach(b => {
+                    const opening = +(p.opening[b.id] ?? 0);
+                    const purchases = rangePurchases(p.from, p.to).filter(x => x.bahanId === b.id).reduce((a, x) => a + (+x.qty || 0), 0);
+                    const used = usageForRange(b, p.from, p.to);
+                    ending[b.id] = opening + purchases - used;
+                });
+                p.ending = ending;
+                previousEnding = ending;
+            });
+        }
+
+        function syncPurchaseToStockMove(purchase) {
+            const idx = db.stockMoves.findIndex(x => x.id === purchase.id && x.type === 'purchase');
+            if (idx >= 0) db.stockMoves[idx] = { ...purchase };
+            else db.stockMoves.push({ ...purchase });
+        }
+
+        function savePurchase(editId = 0) {
+            const b = db.bahan.find(x => x.id === +(document.getElementById('pBahan')?.value || 0));
+            const date = document.getElementById('pDate')?.value || '';
+            const n = +(document.getElementById('pPackages')?.value || 0);
+            const price = +(document.getElementById('pCost')?.value || 0);
+            const note = (document.getElementById('pNote')?.value || '').trim();
             if (!b) return toast('Pilih bahan');
             if (!date) return toast('Tanggal pembelian wajib diisi');
-            if (date < r.from || date > r.to) return toast('Tanggal pembelian harus berada dalam periode yang sedang ditampilkan');
             if (n <= 0) return toast('Jumlah kemasan harus lebih dari 0');
             if (b.unit === 'pcs' && !Number.isInteger(n)) return toast('Jumlah kemasan untuk bahan pcs harus bilangan bulat');
             if (price < 0) return toast('Harga kemasan tidak valid');
-            const qty = n * b.content;
-            const purchase = {
-                id: db.nextId++,
-                type: 'purchase',
-                date,
-                bahanId: b.id,
-                bahanName: b.name,
-                packages: n,
-                qty,
-                unit: b.unit,
-                cost: price,
-                total: n * price,
-                note: (pNoteEl?.value || '').trim()
-            };
-            // Pembelian menjadi sumber stok masuk dan riwayat pembelian.
-            db.purchases.push({
-                ...purchase
-            });
-            db.stockMoves.push({
-                ...purchase
-            });
-            // Pembelian adalah stok masuk. Tidak perlu dimasukkan lagi sebagai stok awal.
-            const p = ensurePeriod(rangeKey(r.from, r.to), r.from, r.to);
-            p.ending[b.id] = +(p.opening[b.id] ?? 0) + rangePurchases(r.from, r.to).filter(x => x.bahanId === b.id).reduce((a, x) => a + (+x.qty || 0), 0) - usageForRange(b, r.from, r.to);
+            const existing = editId ? db.purchases.find(x => x.id === editId) : null;
+            if (editId && !existing) return toast('Data pembelian tidak ditemukan.');
+            const purchase = { id: editId || db.nextId++, type:'purchase', date, bahanId:b.id, bahanName:b.name, packages:n, qty:n*b.content, unit:b.unit, cost:price, total:n*price, note };
+            if (editId) db.purchases = db.purchases.map(x => x.id === editId ? purchase : x);
+            else db.purchases.push(purchase);
+            syncPurchaseToStockMove(purchase);
+            recalculateStockPeriods();
             save();
             closeModal();
             renderAll();
-            toast(`Pembelian tersimpan · stok bertambah ${formatQty(qty)} ${b.unit}`)
+            toast(editId ? 'Pembelian berhasil diperbarui dan stok disesuaikan.' : `Pembelian tersimpan · stok bertambah ${formatQty(purchase.qty)} ${b.unit}`);
         }
 
-        function openExpenseModal() {
-            openModal('Catat Pengeluaran', `<div class="form-grid"><div class="field"><label>KATEGORI</label><input id="eCat" value="Operasional"></div><div class="field"><label>JUMLAH</label><input id="eAmount" type="number"></div><div class="field full"><label>KETERANGAN</label><input id="eNote" placeholder="Contoh: beli gas"></div></div><button class="btn primary" style="margin-top:15px" onclick="saveExpense()">Simpan</button>`)
+        function deletePurchase(id) {
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat menghapus pembelian.');
+            const p = db.purchases.find(x => x.id === id);
+            if (!p) return toast('Data pembelian tidak ditemukan.');
+            if (!confirm(`Hapus pembelian ${p.bahanName} tanggal ${p.date}? Stok masuk dan nilai pembelian terkait akan ikut dibatalkan.`)) return;
+            db.purchases = db.purchases.filter(x => x.id !== id);
+            db.stockMoves = db.stockMoves.filter(x => !(x.id === id && x.type === 'purchase'));
+            recalculateStockPeriods();
+            save();
+            renderAll();
+            toast('Pembelian dihapus dan stok disesuaikan.');
         }
 
-        function saveExpense() {
-            if (!+eAmount.value) return toast('Masukkan jumlah');
-            db.expenses.push({
-                date: today(),
-                cat: eCat.value,
-                note: eNote.value,
-                amount: +eAmount.value
-            });
+        function openExpenseModal(editId = null) {
+            if (editId && !isAdminClient()) return toast('Hanya Admin yang dapat mengedit pengeluaran.');
+            const editing = editId ? db.expenses.find(x => x.id === editId) : null;
+            if (editId && !editing) return toast('Data pengeluaran tidak ditemukan.');
+            openModal(editing ? 'Edit Pengeluaran' : 'Catat Pengeluaran', `<div class="form-grid"><div class="field"><label>TANGGAL</label><input id="eDate" type="date" value="${editing?.date || today()}"></div><div class="field"><label>KATEGORI</label><input id="eCat" value="${editing?.cat || 'Operasional'}"></div><div class="field"><label>JUMLAH</label><input id="eAmount" type="number" min="0" value="${editing?.amount ?? ''}"></div><div class="field full"><label>KETERANGAN</label><input id="eNote" value="${editing?.note || ''}" placeholder="Contoh: beli gas"></div></div><button class="btn primary" style="margin-top:15px" onclick="saveExpense(${editId || 0})">${editing ? 'Simpan Perubahan' : 'Simpan'}</button>`)
+        }
+
+        function saveExpense(editId = 0) {
+            const date = document.getElementById('eDate')?.value || today();
+            const cat = (document.getElementById('eCat')?.value || '').trim();
+            const note = (document.getElementById('eNote')?.value || '').trim();
+            const amount = +(document.getElementById('eAmount')?.value || 0);
+            if (!date) return toast('Tanggal wajib diisi');
+            if (!cat) return toast('Kategori wajib diisi');
+            if (amount <= 0) return toast('Masukkan jumlah');
+            const existing = editId ? db.expenses.find(x => x.id === editId) : null;
+            if (editId && !existing) return toast('Data pengeluaran tidak ditemukan.');
+            const item = { id: editId || db.nextId++, date, cat, note, amount };
+            if (editId) db.expenses = db.expenses.map(x => x.id === editId ? item : x);
+            else db.expenses.push(item);
             save();
             closeModal();
             renderAll();
-            toast('Pengeluaran tersimpan')
+            toast(editId ? 'Pengeluaran berhasil diperbarui.' : 'Pengeluaran tersimpan');
         }
 
-        function deleteExpense(i) {
-            if (confirm('Hapus pengeluaran ini?')) {
-                db.expenses.splice(i, 1);
+        function deleteExpense(id) {
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat menghapus pengeluaran.');
+            const e = db.expenses.find(x => x.id === id);
+            if (!e) return toast('Data pengeluaran tidak ditemukan.');
+            if (confirm(`Hapus pengeluaran ${rupiah(e.amount)} — ${e.note || e.cat}? Data ini juga akan hilang dari laporan terkait.`)) {
+                db.expenses = db.expenses.filter(x => x.id !== id);
                 save();
-                renderAll()
+                renderAll();
+                toast('Pengeluaran dihapus.');
             }
         }
 
