@@ -1372,24 +1372,6 @@
         display: none;
     }
 
-    .actions #logoutTopBtn {
-        display: inline-flex !important;
-        padding: 8px 9px;
-        min-width: 38px;
-        border-radius: 10px;
-        font-size: 0;
-    }
-
-    .actions #logoutTopBtn > span {
-        display: none;
-    }
-
-    .actions #logoutTopBtn::before {
-        content: "↪";
-        font-size: 16px;
-        line-height: 1;
-    }
-
     #cloudStatus {
         font-size: 10px;
         white-space: nowrap;
@@ -2093,23 +2075,6 @@
     color: #1f2937;
 }
 
-.logout-top {
-    display: inline-flex !important;
-    align-items: center;
-    justify-content: center;
-    gap: 5px;
-    color: #b42318;
-    background: #fff;
-    border-color: #f0c7c3;
-    white-space: nowrap;
-    font-weight: 700;
-}
-
-.logout-top:hover {
-    background: #fff5f4;
-    border-color: #e9aaa4;
-}
-
 @media (max-width:760px) {
     .cloud-dot.sync-status {
         font-size: 10px;
@@ -2235,9 +2200,6 @@
     border-radius: 13px;
 }
 
-
-        .kasir-hidden-finance { }
-        body.role-kasir .kasir-hidden-finance { display: none !important; }
 </style>
 </head>
 
@@ -2288,7 +2250,7 @@
                     <p id="dateText"></p>
                 </div>
                 <div class="actions">
-                    <div id="userChip" class="user-chip"></div><button id="logoutTopBtn" class="btn logout-top" type="button" onclick="logout()" title="Keluar">↪ <span>Keluar</span></button><span id="cloudStatus" class="cloud-dot">☁️ Belum tersinkron</span><button id="installAppBtn" class="btn install-app" type="button">📲 Install</button><button class="btn" onclick="backup()">💾 Backup</button><button class="btn primary" onclick="go('kasir')">+ Transaksi</button>
+                    <div id="userChip" class="user-chip"></div><span id="cloudStatus" class="cloud-dot">☁️ Belum tersinkron</span><button id="installAppBtn" class="btn install-app" type="button">📲 Install</button><button class="btn" onclick="backup()">💾 Backup</button><button class="btn primary" onclick="go('kasir')">+ Transaksi</button>
                 </div>
             </section>
 
@@ -2300,25 +2262,25 @@
                         </div>
                         <div class="icon">💰</div>
                     </div>
-                    <div class="card metric kasir-hidden-finance">
+                    <div class="card metric">
                         <div><small>HPP Terjual</small><strong id="mHpp">Rp0</strong>
                             <div class="trend">Berdasarkan resep</div>
                         </div>
                         <div class="icon">🧮</div>
                     </div>
-                    <div class="card metric kasir-hidden-finance">
+                    <div class="card metric">
                         <div><small>Laba Kotor</small><strong id="mLaba">Rp0</strong>
                             <div class="trend">Omzet − HPP</div>
                         </div>
                         <div class="icon">📈</div>
                     </div>
-                    <div class="card metric kasir-hidden-finance">
+                    <div class="card metric">
                         <div><small>Pengeluaran</small><strong id="mKeluar">Rp0</strong>
                             <div class="trend">Hari ini</div>
                         </div>
                         <div class="icon">💸</div>
                     </div>
-                    <div class="card metric receivable-card kasir-hidden-finance">
+                    <div class="card metric receivable-card">
                         <div><small>Belum Dibayar</small><strong id="mPiutang">Rp0</strong>
                             <div class="trend receivable-trend" id="mPiutangCount">0 transaksi</div>
                         </div>
@@ -2376,8 +2338,8 @@
                                     <th>Menu</th>
                                     <th>Kategori</th>
                                     <th>Harga Jual</th>
-                                    <th class="kasir-hidden-finance">HPP</th>
-                                    <th class="kasir-hidden-finance">Laba</th>
+                                    <th>HPP</th>
+                                    <th>Laba</th>
                                     <th>Status</th>
                                     <th></th>
                                 </tr>
@@ -2510,10 +2472,10 @@
                         <div class="field"><label>DARI TANGGAL</label><input id="reportFrom" type="date" onchange="changeReportRange()"></div>
                         <div class="field"><label>SAMPAI TANGGAL</label><input id="reportTo" type="date" onchange="changeReportRange()"></div>
                         <div class="report-actions">
-                            <button class="btn primary kasir-hidden-finance" onclick="printProfitLoss()">📄 Laba Rugi / PDF</button>
-                            <button class="btn kasir-hidden-finance" onclick="printPurchases()">🛒 Pembelian / PDF</button>
-                            <button class="btn kasir-hidden-finance" onclick="printStock()">📦 Stok / PDF</button>
-                            <button class="btn kasir-hidden-finance" onclick="exportCSV()">📊 Export CSV</button>
+                            <button class="btn primary" onclick="printProfitLoss()">📄 Laba Rugi / PDF</button>
+                            <button class="btn" onclick="printPurchases()">🛒 Pembelian / PDF</button>
+                            <button class="btn" onclick="printStock()">📦 Stok / PDF</button>
+                            <button class="btn" onclick="exportCSV()">📊 Export CSV</button>
                         </div>
                     </div>
                 </div>
@@ -2522,15 +2484,15 @@
                         <div><small>Omzet</small><strong id="rOmzet">Rp0</strong></div>
                         <div class="icon">💰</div>
                     </div>
-                    <div class="card metric kasir-hidden-finance">
+                    <div class="card metric">
                         <div><small>Total HPP</small><strong id="rHpp">Rp0</strong></div>
                         <div class="icon">🧮</div>
                     </div>
-                    <div class="card metric kasir-hidden-finance">
+                    <div class="card metric">
                         <div><small>Laba Kotor</small><strong id="rLaba">Rp0</strong></div>
                         <div class="icon">📈</div>
                     </div>
-                    <div class="card metric kasir-hidden-finance">
+                    <div class="card metric">
                         <div><small>Laba Bersih</small><strong id="rNet">Rp0</strong></div>
                         <div class="icon">✨</div>
                     </div>
@@ -2549,8 +2511,8 @@
                                     <th>Status</th>
                                     <th>Sisa</th>
                                     <th>Omzet</th>
-                                    <th class="kasir-hidden-finance">HPP</th>
-                                    <th class="kasir-hidden-finance">Laba</th>
+                                    <th>HPP</th>
+                                    <th>Laba</th>
                                     <th class="no-print">Aksi</th>
                                 </tr>
                             </thead>
@@ -2591,15 +2553,6 @@
                     <div class="hint">Admin dapat membuat akun Kasir baru. Akun Kasir hanya memiliki akses Dashboard, Kasir, dan Laporan.</div>
                     <div id="kasirUserList" style="margin-top:14px"></div>
                 </div>
-
-                <div class="card settings-auth">
-                    <div class="section-title">
-                        <h2>Akun & Firebase</h2>
-                    </div>
-                    <div class="hint">Login menggunakan Firebase Authentication. Data e-Kasir disimpan di Cloud Firestore sesuai role Admin/Kasir.</div>
-                    <button class="btn" style="margin-top:12px" onclick="syncFirebase(true)">☁️ Sinkronkan Sekarang</button>
-                    <div style="margin-top:10px;color:var(--muted);font-size:12px">Tombol <b>Keluar</b> tersedia di bagian atas aplikasi.</div>
-                </div>
                 <div class="card" style="margin-top:18px">
                     <div class="section-title">
                         <h2>Data</h2>
@@ -2637,7 +2590,6 @@
         const AUTH_KEY = 'ekasir_firebase_session';
         let currentUser = null,
             currentRole = '',
-            currentUserName = '',
             KEY = BASE_KEY,
             db = {};
         let firebaseReady = false;
@@ -2789,18 +2741,11 @@
                         return;
                     }
                     currentRole = profile.role || '';
-                    currentUserName = String(profile.name || profile.displayName || user.displayName || user.email || '').trim();
-                } else if (user.uid === 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2') {
-                    currentRole = 'admin';
-                    currentUserName = String(user.displayName || user.email || 'Admin').trim();
-                } else {
-                    currentRole = '';
-                    currentUserName = String(user.displayName || user.email || '').trim();
-                }
+                } else if (user.uid === 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2') currentRole = 'admin';
+                else currentRole = '';
             } catch (e) {
                 console.error('load user profile:', e);
-                currentRole = user.uid === 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2' ? 'admin' : '';
-                currentUserName = String(user.displayName || user.email || '').trim();
+                currentRole = user.uid === 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2' ? 'admin' : ''
             }
             document.getElementById('authScreen').style.display = 'none';
             renderUserChip();
@@ -2834,27 +2779,6 @@
             // Tombol yang mengarah ke fungsi administrasi juga disembunyikan untuk Kasir.
             const backupBtn = document.querySelector('.topbar .actions button[onclick=\"backup()\"]');
             if (backupBtn) backupBtn.style.display = kasir ? 'none' : '';
-        }
-
-        function applyKasirFinancialView() {
-            const isKasir = isKasirClient();
-            document.body.classList.toggle('role-kasir', isKasir);
-            if (isKasir) {
-                const from = document.getElementById('reportFrom');
-                const to = document.getElementById('reportTo');
-                const d = today();
-                if (from) { from.value = d; from.disabled = true; }
-                if (to) { to.value = d; to.disabled = true; }
-                const title = document.querySelector('#laporan .section-title h2');
-                if (title) title.textContent = 'Laporan Omset Hari Ini';
-                const desc = document.querySelector('#laporan .section-title small');
-                if (desc) desc.textContent = 'Menampilkan omset dan transaksi hari ini.';
-            } else {
-                const from = document.getElementById('reportFrom');
-                const to = document.getElementById('reportTo');
-                if (from) from.disabled = false;
-                if (to) to.disabled = false;
-            }
         }
 
         function canAccessPage(page) {
@@ -2965,14 +2889,7 @@
                         merge: true
                     })
                 } else if (isKasirClient()) {
-                    // Kasir hanya menyinkronkan transaksi miliknya sendiri.
-                    // Transaksi kasir lain tetap bisa dibaca untuk laporan, tetapi
-                    // tidak pernah dicoba ditulis ulang sehingga tidak memicu
-                    // Missing or insufficient permissions.
-                    const ownTransactions = db.transactions.filter(t =>
-                        String(t.cashierUid || '') === String(currentUser?.uid || '')
-                    );
-                    await writeArray('transactions', ownTransactions, false);
+                    await Promise.all([writeArray('transactions', db.transactions, false), writeArray('purchases', db.purchases, false), writeArray('expenses', db.expenses, false)])
                 }
                 localStorage.setItem(KEY, JSON.stringify(db));
                 setCloudStatus('Tersinkron', true)
@@ -2992,9 +2909,8 @@
 
         function save() {
             normalizeDb();
-            // Simpan lokal terlebih dahulu agar data tidak hilang bila jaringan/Firebase lambat.
             localStorage.setItem(KEY, JSON.stringify(db));
-            queueCloudSync();
+            queueCloudSync()
         }
 
         function renderUserChip() {
@@ -3011,7 +2927,6 @@
             localStorage.removeItem(AUTH_KEY);
             currentUser = null;
             currentRole = '';
-            currentUserName = '';
             KEY = BASE_KEY;
             db = blankDb();
             document.getElementById('authScreen').style.display = 'grid';
@@ -3283,7 +3198,7 @@ let pendingPurchaseBahanId = null;
             const piutangCountEl = document.getElementById('mPiutangCount');
             if (piutangEl) piutangEl.textContent = rupiah(unpaidTotal);
             if (piutangCountEl) piutangCountEl.textContent = `${unpaid.length} transaksi belum lunas`;
-            const rr = isKasirClient() ? {from: today(), to: today()} : getReportRange(),
+            const rr = getReportRange(),
                 rtx = rangeTransactions(rr.from, rr.to),
                 rex = db.expenses.filter(x => inRange(x.date, rr.from, rr.to));
             const totalO = rtx.reduce((a, b) => a + b.total, 0),
@@ -3513,9 +3428,7 @@ let pendingPurchaseBahanId = null;
                 pay: pendingCheckout.pay || 'Tunai',
                 paidAmount: Math.max(0, +paidAmount || 0),
                 change: Math.max(0, +change || 0),
-                status: status,
-                cashierUid: currentUser?.uid || '',
-                cashierName: currentUserName || currentUser?.displayName || currentUser?.email || 'Kasir'
+                status: status
             };
             db.transactions.push(record);
             save();
@@ -3747,7 +3660,7 @@ let pendingPurchaseBahanId = null;
 
         function renderReport() {
             setReportRangeDefaults();
-            const r = isKasirClient() ? {from: today(), to: today()} : getReportRange(),
+            const r = getReportRange(),
                 tx = rangeTransactions(r.from, r.to).slice().reverse();
             const label = document.getElementById('reportPeriodLabel');
             if (label) label.textContent = `${r.from.split('-').reverse().join('/')} – ${r.to.split('-').reverse().join('/')}`;
@@ -3756,7 +3669,7 @@ let pendingPurchaseBahanId = null;
                 const cls = status === 'lunas' ? 'status-paid' : status === 'sebagian' ? 'status-partial' : 'status-unpaid';
                 const label = status === 'lunas' ? 'Lunas' : status === 'sebagian' ? 'Belum Lunas' : 'Belum Bayar';
                 const remaining = Math.max(0, (+t.total || 0) - (+t.paidAmount || 0));
-                return `<tr><td>${t.date} ${t.time}</td><td>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</td><td>${t.pay}</td><td><span class="badge ${cls}">${label}</span></td><td>${remaining ? rupiah(remaining) : '-'}</td><td>${rupiah(t.total)}</td><td class="kasir-hidden-finance">${rupiah(t.hpp)}</td><td class="kasir-hidden-finance"><b>${rupiah(t.total-t.hpp)}</b></td><td class="no-print"><button class="btn" onclick="openThermalOptions(${t.id})">🧾 Nota</button>${status !== 'lunas' ? `<button class="btn" style="margin-left:5px" onclick="openSettlePayment(${t.id})">💳 Bayar</button>` : ''}</td></tr>`;
+                return `<tr><td>${t.date} ${t.time}</td><td>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</td><td>${t.pay}</td><td><span class="badge ${cls}">${label}</span></td><td>${remaining ? rupiah(remaining) : '-'}</td><td>${rupiah(t.total)}</td><td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td><td class="no-print"><button class="btn" onclick="openThermalOptions(${t.id})">🧾 Nota</button>${status !== 'lunas' ? `<button class="btn" style="margin-left:5px" onclick="openSettlePayment(${t.id})">💳 Bayar</button>` : ''}</td></tr>`;
             }).join('') || '<tr><td colspan="9"><div class="empty">Belum ada transaksi pada periode ini.</div></td></tr>';
         }
 
@@ -4137,7 +4050,6 @@ let pendingPurchaseBahanId = null;
         }
 
         function exportCSV() {
-            if (isKasirClient()) return toast('Export CSV tidak tersedia untuk Kasir.');
             const r = getReportRange();
             const rows = [
                 ['Tanggal', 'Waktu', 'Item', 'Pembayaran', 'Omzet', 'HPP', 'Laba'],
@@ -4178,7 +4090,6 @@ let pendingPurchaseBahanId = null;
         }
 
         function printProfitLoss() {
-            if (isKasirClient()) return toast('Laporan laba rugi hanya tersedia untuk Admin.');
             const r = getReportRange(),
                 tx = rangeTransactions(r.from, r.to),
                 ex = db.expenses.filter(x => inRange(x.date, r.from, r.to));
@@ -4194,7 +4105,6 @@ let pendingPurchaseBahanId = null;
         }
 
         function printPurchases() {
-            if (isKasirClient()) return toast('Laporan pembelian hanya tersedia untuk Admin.');
             const r = getReportRange(),
                 rows = rangePurchases(r.from, r.to).slice().sort((a, b) => String(a.date).localeCompare(String(b.date))),
                 total = rows.reduce((a, x) => a + (+x.total || 0), 0);
@@ -4204,7 +4114,6 @@ let pendingPurchaseBahanId = null;
         }
 
         function printStock() {
-            if (isKasirClient()) return toast('Laporan stok hanya tersedia untuk Admin.');
             const r = getReportRange(),
                 rows = db.bahan.map(b => ({
                     b,
@@ -4227,13 +4136,13 @@ let pendingPurchaseBahanId = null;
             if (!t) return;
             const items = t.items.map(i => `<div class="item"><div class="item-name">${i.name}</div><div class="row"><span>${i.qty} × ${rupiah(i.price)}</span><span>${rupiah(i.qty*i.price)}</span></div></div>`).join('');
             const logo = db.settings?.logo ? `<div class="t-logo"><img src="${db.settings.logo}" alt="Logo"></div>` : '';
-            const receipt = `<div class="thermal-receipt"><div class="t-logo">${logo}</div><h1>${db.settings?.name||'e-Kasir'}</h1><div class="center">${db.settings?.address||''}<br>${db.settings?.phone||''}</div><div class="line"></div><div>No. ${t.id} · ${formatDateID(t.date)} ${t.time}</div><div class="cashier">Kasir: ${t.cashierName || currentUserName || currentUser?.email || 'Kasir'}</div><div class="line"></div>${items}<div class="line"></div><div class="row total"><span>TOTAL</span><span>${rupiah(t.total)}</span></div><div class="row"><span>Pembayaran</span><span>${t.pay}</span></div><div class="line"></div><div class="center">Terima kasih</div></div>`;
+            const receipt = `<div class="thermal-receipt"><div class="t-logo">${logo}</div><h1>${db.settings?.name||'e-Kasir'}</h1><div class="center">${db.settings?.address||''}<br>${db.settings?.phone||''}</div><div class="line"></div><div>No. ${t.id} · ${formatDateID(t.date)} ${t.time}</div><div class="line"></div>${items}<div class="line"></div><div class="row total"><span>TOTAL</span><span>${rupiah(t.total)}</span></div><div class="row"><span>Pembayaran</span><span>${t.pay}</span></div><div class="line"></div><div class="center">Terima kasih</div></div>`;
             const w = window.open('', '_blank', 'width=420,height=700');
             if (!w) {
                 toast('Popup diblokir browser. Izinkan popup untuk mencetak.');
                 return
             }
-            w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Nota ${t.id}</title><style>@page{size:${width}mm auto;margin:2mm}html,body{margin:0;padding:0;background:#fff}body{font-family:Arial,sans-serif;color:#000}.thermal-receipt{width:${width-8}mm;margin:0 auto;font-size:${width===57?10:12}px}.t-logo{text-align:center;margin-bottom:4px}.t-logo img{max-width:${width===57?30:38}mm;max-height:18mm;object-fit:contain;filter:grayscale(1)}h1{font-size:16px;text-align:center;margin:0 0 2px}.center{text-align:center}.line{border-top:1px dashed #000;margin:6px 0}.row{display:flex;justify-content:space-between;gap:8px}.cashier{margin-top:2px}.item{margin:5px 0}.item-name{font-weight:700}.total{font-size:14px;font-weight:700}</style></head><body>${receipt}</body></html>`);
+            w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Nota ${t.id}</title><style>@page{size:${width}mm auto;margin:2mm}html,body{margin:0;padding:0;background:#fff}body{font-family:Arial,sans-serif;color:#000}.thermal-receipt{width:${width-8}mm;margin:0 auto;font-size:${width===57?10:12}px}.t-logo{text-align:center;margin-bottom:4px}.t-logo img{max-width:${width===57?30:38}mm;max-height:18mm;object-fit:contain;filter:grayscale(1)}h1{font-size:16px;text-align:center;margin:0 0 2px}.center{text-align:center}.line{border-top:1px dashed #000;margin:6px 0}.row{display:flex;justify-content:space-between;gap:8px}.item{margin:5px 0}.item-name{font-weight:700}.total{font-size:14px;font-weight:700}</style></head><body>${receipt}</body></html>`);
             w.document.close();
             w.focus();
             setTimeout(() => w.print(), 250);
@@ -4241,7 +4150,6 @@ let pendingPurchaseBahanId = null;
         }
 
         function renderAll() {
-            applyKasirFinancialView();
             metrics();
             renderRecent();
             renderLow();
