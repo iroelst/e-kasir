@@ -3759,14 +3759,34 @@ let pendingPurchaseBahanId = null;
                 emoji: '☕',
                 active: true
             };
-            const r = db.recipes.find(x => +x.menuId === +id);
-            menuRecipeDraft = (r?.items || []).map(item => Array.isArray(item) ? {
-                bahanId: db.bahan.find(b => b.name === item[0])?.id || 0,
-                qty: +item[1] || 0
-            } : {
-                bahanId: +item.bahanId || 0,
-                qty: +item.qty || 0
-            });
+            // Ambil resep lama maupun resep baru. Beberapa resep lama tersimpan
+            // dengan menuId sebagai string atau dengan nama menu, dan item bahan
+            // lama bisa tersimpan sebagai [nama, qty].
+            const r = db.recipes.find(x =>
+                String(x.menuId ?? x.menuID ?? '') === String(id) ||
+                String(x.menuName ?? x.menu ?? '') === String(m.name)
+            );
+
+            const findBahanId = (item) => {
+                const rawId = item?.bahanId ?? item?.bahanID ?? item?.ingredientId;
+                if (rawId !== undefined && rawId !== null && rawId !== '') {
+                    const byId = db.bahan.find(b => String(b.id) === String(rawId));
+                    if (byId) return byId.id;
+                }
+                const rawName = Array.isArray(item) ? item[0] :
+                    (item?.name ?? item?.bahan ?? item?.bahanName ?? item?.ingredient ?? '');
+                const name = String(rawName || '').trim().toLowerCase();
+                const byName = db.bahan.find(b => String(b.name || '').trim().toLowerCase() === name);
+                return byName?.id || 0;
+            };
+
+            const getQty = item => Array.isArray(item) ? (+item[1] || 0) :
+                (+((item?.qty ?? item?.jumlah ?? item?.quantity) || 0));
+
+            menuRecipeDraft = (r?.items || r?.recipe || r?.bahan || []).map(item => ({
+                bahanId: findBahanId(item),
+                qty: getQty(item)
+            })).filter(item => item.bahanId || item.qty);
             const selectedCat = m.cat || 'Minuman';
             const selectedEmoji = m.emoji || ({Minuman:'🥤',Makanan:'🍜',Snack:'🍟'}[selectedCat] || '🥤');
             openModal(id ? 'Edit Menu' : 'Tambah Menu', `<div class=\"field\"><label>KATEGORI & IKON</label><div id=\"menuIconChoices\" style=\"display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px\"><button type=\"button\" class=\"menu-icon-choice ${selectedCat==='Minuman'?'active':''}\" data-cat=\"Minuman\" data-emoji=\"🥤\" onclick=\"selectMenuCategory('Minuman','🥤')\"><span style=\"font-size:34px;display:block;line-height:1.1\">🥤</span><b>Minuman</b></button><button type=\"button\" class=\"menu-icon-choice ${selectedCat==='Makanan'?'active':''}\" data-cat=\"Makanan\" data-emoji=\"🍜\" onclick=\"selectMenuCategory('Makanan','🍜')\"><span style=\"font-size:34px;display:block;line-height:1.1\">🍜</span><b>Makanan</b></button><button type=\"button\" class=\"menu-icon-choice ${selectedCat==='Snack'?'active':''}\" data-cat=\"Snack\" data-emoji=\"🍟\" onclick=\"selectMenuCategory('Snack','🍟')\"><span style=\"font-size:34px;display:block;line-height:1.1\">🍟</span><b>Snack</b></button></div><select id=\"fCat\" style=\"display:none\"><option ${selectedCat==='Minuman'?'selected':''}>Minuman</option><option ${selectedCat==='Makanan'?'selected':''}>Makanan</option><option ${selectedCat==='Snack'?'selected':''}>Snack</option></select><input type=\"hidden\" id=\"fEmoji\" value=\"${selectedEmoji}\"></div><div class=\"form-grid\" style=\"margin-top:12px\"><div class=\"field\"><label>NAMA MENU</label><input id=\"fName\" value=\"${m.name}\"></div><div class=\"field\"><label>HARGA JUAL</label><input id=\"fPrice\" type=\"number\" value=\"${m.price}\" oninput=\"renderRecipeRows()\"></div><div class=\"field\"><label>HPP / PORSI</label><input id=\"fHpp\" type=\"number\" value=\"${m.hpp||0}\" readonly></div><div class=\"field\"><label>FOOD COST</label><input id=\"foodCostPreview\" value=\"-\" readonly></div></div><div style=\"margin-top:15px\"><div class=\"section-title\"><h3 style=\"margin:0\">Resep</h3><button class=\"btn\" onclick=\"addRecipeRow()\">+ Tambah Bahan</button></div><div id=\"recipeRows\"></div></div><button class=\"btn primary\" style=\"margin-top:15px\" onclick=\"saveMenu(${id||0})\">Simpan</button>`);
@@ -3817,7 +3837,7 @@ let pendingPurchaseBahanId = null;
                     qty: +r.qty
                 }))
             };
-            const idx = db.recipes.findIndex(r => r.menuId === x.id);
+            const idx = db.recipes.findIndex(r => String(r.menuId ?? r.menuID ?? '') === String(x.id));
             if (idx >= 0) db.recipes[idx] = rec;
             else db.recipes.push(rec);
             save();
