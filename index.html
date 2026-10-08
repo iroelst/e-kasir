@@ -2930,10 +2930,14 @@
                         merge: true
                     })
                 } else if (isKasirClient()) {
-                    // Kasir hanya menyimpan transaksi penjualan.
-                    // Jangan mencoba menulis purchases/expenses karena Firestore Rules
-                    // memang melarang Kasir membuat atau mengubah keduanya.
-                    await writeArray('transactions', db.transactions, false);
+                    // Kasir hanya menyinkronkan transaksi miliknya sendiri.
+                    // Transaksi kasir lain tetap bisa dibaca untuk laporan, tetapi
+                    // tidak pernah dicoba ditulis ulang sehingga tidak memicu
+                    // Missing or insufficient permissions.
+                    const ownTransactions = db.transactions.filter(t =>
+                        String(t.cashierUid || '') === String(currentUser?.uid || '')
+                    );
+                    await writeArray('transactions', ownTransactions, false);
                 }
                 localStorage.setItem(KEY, JSON.stringify(db));
                 setCloudStatus('Tersinkron', true)
