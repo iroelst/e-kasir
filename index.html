@@ -1366,9 +1366,27 @@
         gap: 6px;
         align-items: center;
     }
+    .logout-top {
+        display: inline-flex !important;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        white-space: nowrap;
+    }
 
     .actions .btn:not(.primary),
     #userChip {
+        display: none;
+    }
+    .actions .logout-top {
+        display: inline-flex !important;
+        width: 40px;
+        min-width: 40px;
+        padding: 9px 0;
+        font-size: 17px;
+    }
+
+    .actions .logout-top span {
         display: none;
     }
 
@@ -2251,7 +2269,7 @@
                     <p id="dateText"></p>
                 </div>
                 <div class="actions">
-                    <div id="userChip" class="user-chip"></div><span id="cloudStatus" class="cloud-dot">☁️ Belum tersinkron</span><button id="installAppBtn" class="btn install-app" type="button">📲 Install</button><button class="btn" onclick="backup()">💾 Backup</button><button class="btn primary" onclick="go('kasir')">+ Transaksi</button>
+                    <div id="userChip" class="user-chip"></div><button id="logoutTopBtn" class="btn logout-top" type="button" onclick="logout()" title="Keluar">↪ <span>Keluar</span></button><span id="cloudStatus" class="cloud-dot">☁️ Belum tersinkron</span><button id="installAppBtn" class="btn install-app" type="button">📲 Install</button><button class="btn" onclick="backup()">💾 Backup</button><button class="btn primary" onclick="go('kasir')">+ Transaksi</button>
                 </div>
             </section>
 
