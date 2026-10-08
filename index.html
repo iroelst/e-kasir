@@ -3759,7 +3759,7 @@ let pendingPurchaseBahanId = null;
                 emoji: '☕',
                 active: true
             };
-            const r = db.recipes.find(x => x.menuId === id);
+            const r = db.recipes.find(x => +x.menuId === +id);
             menuRecipeDraft = (r?.items || []).map(item => Array.isArray(item) ? {
                 bahanId: db.bahan.find(b => b.name === item[0])?.id || 0,
                 qty: +item[1] || 0
