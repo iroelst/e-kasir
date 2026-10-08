@@ -2930,7 +2930,10 @@
                         merge: true
                     })
                 } else if (isKasirClient()) {
-                    await Promise.all([writeArray('transactions', db.transactions, false), writeArray('purchases', db.purchases, false), writeArray('expenses', db.expenses, false)])
+                    // Kasir hanya menyimpan transaksi penjualan.
+                    // Jangan mencoba menulis purchases/expenses karena Firestore Rules
+                    // memang melarang Kasir membuat atau mengubah keduanya.
+                    await writeArray('transactions', db.transactions, false);
                 }
                 localStorage.setItem(KEY, JSON.stringify(db));
                 setCloudStatus('Tersinkron', true)
@@ -2950,8 +2953,9 @@
 
         function save() {
             normalizeDb();
+            // Simpan lokal terlebih dahulu agar data tidak hilang bila jaringan/Firebase lambat.
             localStorage.setItem(KEY, JSON.stringify(db));
-            queueCloudSync()
+            queueCloudSync();
         }
 
         function renderUserChip() {
