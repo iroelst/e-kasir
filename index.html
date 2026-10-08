@@ -2903,12 +2903,45 @@
                 db.nextId = Math.max(1, ...[].concat(db.menus, db.bahan, db.transactions, db.purchases, db.expenses, db.stockMoves).map(x => +x.id || 0)) + 1;
                 normalizeDb();
                 localStorage.setItem(KEY, JSON.stringify(db));
+                await migrateUndefinedRecipes();
                 setCloudStatus('Tersinkron', true)
             } catch (e) {
                 console.error(e);
                 setCloudStatus('Sinkron gagal');
             }
         }
+        async function migrateUndefinedRecipes() {
+            if (!isAdminClient() || !firebaseReady || !currentUser) return;
+            try {
+                const ref = colRef('recipes');
+                const bad = await ref.doc('undefined').get();
+                if (!bad.exists) return;
+                const data = bad.data() || {};
+                const menuId = data.menuId ?? data.menuID ?? data.menu_id;
+                if (menuId === undefined || menuId === null || String(menuId).trim() === '' || String(menuId) === 'undefined') {
+                    console.warn('recipes/undefined ditemukan tetapi menuId tidak tersedia:', data);
+                    return;
+                }
+                const targetId = String(menuId);
+                const target = ref.doc(targetId);
+                const existing = await target.get();
+                const payload = { ...data, menuId: menuId };
+                delete payload.__docId;
+                if (existing.exists) {
+                    const oldItems = Array.isArray(existing.data()?.items) ? existing.data().items : [];
+                    const newItems = Array.isArray(data.items) ? data.items : [];
+                    if (newItems.length && (!oldItems.length || JSON.stringify(oldItems) !== JSON.stringify(newItems))) {
+                        payload.items = newItems;
+                    }
+                }
+                await target.set(payload, { merge: true });
+                await ref.doc('undefined').delete();
+                console.info('Migrasi resep berhasil: recipes/undefined -> recipes/' + targetId);
+            } catch (e) {
+                console.error('migrateUndefinedRecipes:', e);
+            }
+        }
+
         async function writeArray(name, arr, allowDelete = false) {
             const ref = colRef(name),
                 existing = await ref.get();
