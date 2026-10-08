@@ -3614,18 +3614,6 @@ let pendingPurchaseBahanId = null;
             stockEndingTotal.textContent = rupiah(endingTotal);
             stockPeriodStatus.textContent = `Periode ${r.from.split('-').reverse().join('/')} – ${r.to.split('-').reverse().join('/')} · Stok akhir dihitung otomatis`;
             purchaseTable.innerHTML = rangePurchases(r.from, r.to).slice().reverse().map(m => `<tr><td>${m.date}</td><td><b>${m.bahanName}</b></td><td>${formatQty(m.packages||0)} kemasan</td><td>${formatQty(m.qty)} ${m.unit}</td><td>${rupiah(m.cost)}</td><td>${rupiah(m.total)}</td><td>${m.note||'-'}</td></tr>`).join('') || '<tr><td colspan="7"><div class="empty">Belum ada pembelian pada periode ini.</div></td></tr>';
-            recipeInfo.innerHTML = db.recipes.length ? db.recipes.map(r => {
-                let m = db.menus.find(x => x.id === r.menuId);
-                let cost = r.items.reduce((ss, item) => {
-                    const z = recipeItemParts(item);
-                    const b = db.bahan.find(b => b.name === z.name);
-                    return ss + stockValue(b || {
-                        content: 1,
-                        cost: 0
-                    }, z.qty)
-                }, 0);
-                return `<div class="cart-item"><div><b>${m?.name||'Menu'}</b><small style="display:block;color:var(--muted)">${r.items.map(item=>{const z=recipeItemParts(item);return z.name+' '+formatQty(z.qty)}).join(' · ')}</small></div><b>${rupiah(cost)}</b></div>`
-            }).join('') : '<div class="empty">Belum ada resep. Buat menu dan susun resepnya untuk menghitung HPP otomatis.</div>';
             document.getElementById('stockFrom').value = r.from;
             document.getElementById('stockTo').value = r.to;
         }
