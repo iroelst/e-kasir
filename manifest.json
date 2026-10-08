@@ -1,7 +1,7 @@
 {
-  "name": "e-Kasir — Aplikasi Penjualan",
+  "name": "e-Kasir",
   "short_name": "e-Kasir",
-  "description": "Aplikasi penjualan dan stok e-Kasir",
+  "description": "Aplikasi penjualan dan stok",
   "lang": "id-ID",
   "start_url": "./",
   "scope": "./",
