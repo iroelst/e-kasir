@@ -928,6 +928,20 @@
             white-space: nowrap
         }
 
+        #kasirUserList .user-row {
+            display:flex;justify-content:space-between;align-items:center;gap:12px;
+            padding:11px 0;border-bottom:1px solid var(--line);
+        }
+        #kasirUserList .user-row:last-child { border-bottom:0; }
+        #kasirUserList .user-info strong { display:block;font-size:13px; }
+        #kasirUserList .user-info small { color:var(--muted);font-size:11px; }
+        #kasirUserList .user-actions { display:flex;gap:6px;flex-wrap:wrap; }
+        @media(max-width:480px){
+            #kasirUserList .user-row { align-items:flex-start;flex-direction:column; }
+            #kasirUserList .user-actions { width:100%; }
+            #kasirUserList .user-actions .btn { flex:1; }
+        }
+
         .settings-logo {
             display: flex;
             gap: 14px;
@@ -2531,6 +2545,15 @@
                     <button class="btn primary" style="margin-top:15px" onclick="saveSettings()">Simpan Pengaturan</button>
                 </div>
 
+                <div class="card settings-auth" id="userManagementCard">
+                    <div class="section-title">
+                        <h2>Manajemen User</h2>
+                        <button class="btn primary" onclick="openAddKasirModal()">+ Tambah Kasir</button>
+                    </div>
+                    <div class="hint">Admin dapat membuat akun Kasir baru. Akun Kasir hanya memiliki akses Dashboard, Kasir, dan Laporan.</div>
+                    <div id="kasirUserList" style="margin-top:14px"></div>
+                </div>
+
                 <div class="card settings-auth">
                     <div class="section-title">
                         <h2>Akun & Firebase</h2>
@@ -2579,6 +2602,8 @@
             KEY = BASE_KEY,
             db = {};
         let firebaseReady = false;
+        let firebaseAdminApp = null;
+        let firebaseAdminAuth = null;
 
         function blankDb() {
             return {
@@ -2713,16 +2738,32 @@
             normalizeDb();
             try {
                 const p = await fbFs.doc('users/' + user.uid).get();
-                if (p.exists) currentRole = p.data().role || '';
-                else if (user.uid === 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2') currentRole = 'admin';
+                if (p.exists) {
+                    const profile = p.data() || {};
+                    if (profile.disabled === true && user.uid !== 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2') {
+                        currentUser = null;
+                        currentRole = '';
+                        localStorage.removeItem(AUTH_KEY);
+                        try { await fbAuth.signOut(); } catch (e) {}
+                        document.getElementById('authScreen').style.display = 'grid';
+                        showAuthMessage('Akun Anda sedang dinonaktifkan. Hubungi Admin.');
+                        return;
+                    }
+                    currentRole = profile.role || '';
+                } else if (user.uid === 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2') currentRole = 'admin';
                 else currentRole = '';
             } catch (e) {
+                console.error('load user profile:', e);
                 currentRole = user.uid === 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2' ? 'admin' : ''
             }
             document.getElementById('authScreen').style.display = 'none';
             renderUserChip();
+            applyRoleAccess();
+            ensureAdminUserManagement();
             renderAll();
             await loadFirebaseData();
+            applyRoleAccess();
+            ensureAdminUserManagement();
             renderAll()
         }
 
@@ -2733,6 +2774,28 @@
         function isKasirClient() {
             return currentRole === 'kasir'
         }
+
+        // Hak akses menu berdasarkan role. Kasir hanya boleh melihat Dashboard, Kasir, dan Laporan.
+        function applyRoleAccess() {
+            const kasir = isKasirClient();
+            const allowedKasirPages = ['dashboard', 'kasir', 'laporan'];
+
+            document.querySelectorAll('.nav button').forEach(btn => {
+                const page = btn.dataset.page;
+                btn.style.display = (!kasir || allowedKasirPages.includes(page)) ? '' : 'none';
+            });
+
+            // Tombol yang mengarah ke fungsi administrasi juga disembunyikan untuk Kasir.
+            const backupBtn = document.querySelector('.topbar .actions button[onclick=\"backup()\"]');
+            if (backupBtn) backupBtn.style.display = kasir ? 'none' : '';
+        }
+
+        function canAccessPage(page) {
+            if (isAdminClient()) return true;
+            if (isKasirClient()) return ['dashboard', 'kasir', 'laporan'].includes(page);
+            return false;
+        }
+
         const COLLECTIONS = {
             menus: 'menus',
             bahan: 'bahan',
@@ -3099,6 +3162,11 @@ let pendingPurchaseBahanId = null;
         }
 
         function go(page) {
+            // Blokir akses halaman yang tidak diizinkan berdasarkan role.
+            if (!canAccessPage(page)) {
+                toast('Menu ini hanya dapat diakses oleh Admin.');
+                return;
+            }
             document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
             document.getElementById(page).classList.add('active');
             document.querySelectorAll('.nav button').forEach(x => x.classList.toggle('active', x.dataset.page === page));
@@ -4106,9 +4174,120 @@ let pendingPurchaseBahanId = null;
             shopPhone.value = db.settings.phone || '';
             shopAddress.value = db.settings.address || '';
             renderLogoSetting();
+            ensureAdminUserManagement();
         }
 
 
+
+        function ensureAdminUserManagement() {
+            const card = document.getElementById('userManagementCard');
+            if (card) card.style.display = isAdminClient() ? '' : 'none';
+            if (isAdminClient()) renderKasirUsers();
+        }
+
+        async function getKasirUsers() {
+            if (!firebaseReady || !isAdminClient()) return [];
+            const snap = await fbFs.collection('users').where('role', '==', 'kasir').get();
+            return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        }
+
+        async function renderKasirUsers() {
+            const box = document.getElementById('kasirUserList');
+            if (!box || !isAdminClient()) return;
+            box.innerHTML = '<div class="empty" style="padding:16px 5px">Memuat daftar Kasir...</div>';
+            try {
+                const users = await getKasirUsers();
+                if (!users.length) {
+                    box.innerHTML = '<div class="empty" style="padding:16px 5px">Belum ada akun Kasir.</div>';
+                    return;
+                }
+                box.innerHTML = users.map(u => {
+                    const email = String(u.email || '');
+                    const name = String(u.name || u.nama || email || 'Kasir');
+                    const active = u.disabled !== true;
+                    return `<div class="user-row">
+                        <div class="user-info"><strong>${escapeHtml(name)}</strong><small>${escapeHtml(email)} · ${active ? 'Aktif' : 'Dinonaktifkan'}</small></div>
+                        <div class="user-actions">
+                            <button class="btn" onclick="toggleKasirUser('${u.id}',${active})">${active ? 'Nonaktifkan' : 'Aktifkan'}</button>
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch (e) {
+                console.error('renderKasirUsers:', e);
+                box.innerHTML = '<div class="empty" style="padding:16px 5px">Daftar user tidak dapat dimuat. Periksa Firestore Rules.</div>';
+            }
+        }
+
+        function escapeHtml(v) {
+            return String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+        }
+
+        function openAddKasirModal() {
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat menambahkan Kasir.');
+            openModal('Tambah User Kasir', `<form id="addKasirForm" onsubmit="createKasirUser(event)">
+                <div class="form-grid">
+                    <div class="field full"><label>NAMA KASIR</label><input id="kasirName" required placeholder="Contoh: Budi"></div>
+                    <div class="field full"><label>EMAIL</label><input id="kasirEmail" type="email" required placeholder="kasir@email.com"></div>
+                    <div class="field"><label>PASSWORD</label><input id="kasirPassword" type="password" minlength="6" required placeholder="Minimal 6 karakter"></div>
+                    <div class="field"><label>KONFIRMASI PASSWORD</label><input id="kasirPassword2" type="password" minlength="6" required placeholder="Ulangi password"></div>
+                </div>
+                <div class="hint" style="margin-top:12px">Role akan otomatis disimpan sebagai <b>Kasir</b>.</div>
+                <button id="saveKasirBtn" class="btn primary" style="width:100%;margin-top:15px" type="submit">Buat Akun Kasir</button>
+            </form>`);
+        }
+
+        async function createKasirUser(ev) {
+            ev.preventDefault();
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat menambahkan Kasir.');
+            if (!firebaseReady) return toast('Firebase belum siap.');
+            const name = document.getElementById('kasirName').value.trim();
+            const email = document.getElementById('kasirEmail').value.trim().toLowerCase();
+            const password = document.getElementById('kasirPassword').value;
+            const password2 = document.getElementById('kasirPassword2').value;
+            const btn = document.getElementById('saveKasirBtn');
+            if (password !== password2) return toast('Konfirmasi password tidak sama.');
+            if (password.length < 6) return toast('Password minimal 6 karakter.');
+            btn.disabled = true;
+            btn.textContent = 'Membuat akun...';
+            try {
+                // Gunakan Firebase App kedua agar Admin tetap login saat membuat akun baru.
+                if (!firebaseAdminApp) firebaseAdminApp = firebase.initializeApp(FIREBASE_CONFIG, 'kasirCreator');
+                firebaseAdminAuth = firebaseAdminApp.auth();
+                const cred = await firebaseAdminAuth.createUserWithEmailAndPassword(email, password);
+                await fbFs.doc('users/' + cred.user.uid).set({
+                    uid: cred.user.uid,
+                    name,
+                    email,
+                    role: 'kasir',
+                    disabled: false,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    createdBy: currentUser.uid
+                });
+                try { await firebaseAdminAuth.signOut(); } catch (e) {}
+                closeModal();
+                await renderKasirUsers();
+                toast('User Kasir berhasil dibuat.');
+            } catch (e) {
+                console.error('createKasirUser:', e);
+                let msg = e?.code === 'auth/email-already-in-use' ? 'Email sudah terdaftar.' : (e?.message || 'Gagal membuat akun Kasir.');
+                toast(msg);
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = 'Buat Akun Kasir'; }
+            }
+        }
+
+        async function toggleKasirUser(uid, currentlyActive) {
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengubah user.');
+            if (!confirm((currentlyActive ? 'Nonaktifkan' : 'Aktifkan') + ' akun Kasir ini?')) return;
+            try {
+                await fbFs.doc('users/' + uid).set({ disabled: !currentlyActive }, { merge: true });
+                await renderKasirUsers();
+                toast(currentlyActive ? 'Akun Kasir dinonaktifkan.' : 'Akun Kasir diaktifkan.');
+            } catch (e) {
+                console.error('toggleKasirUser:', e);
+                toast(e?.message || 'Gagal mengubah status Kasir.');
+            }
+        }
 
         async function saveSettings() {
             const oldLogo = db.settings?.logo || '';
