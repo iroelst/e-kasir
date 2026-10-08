@@ -2914,7 +2914,16 @@
                 existing = await ref.get();
             const wanted = new Set();
             for (const item of arr) {
-                const id = String(item.id);
+                // Resep tidak mempunyai field id tersendiri. Gunakan menuId
+                // sebagai ID dokumen agar 1 menu selalu mempunyai 1 dokumen resep.
+                const rawId = name === 'recipes'
+                    ? (item.menuId ?? item.menuID ?? item.id)
+                    : item.id;
+                if (rawId === undefined || rawId === null || String(rawId).trim() === '' || String(rawId) === 'undefined') {
+                    console.warn('Dokumen ' + name + ' dilewati karena ID tidak valid:', item);
+                    continue;
+                }
+                const id = String(rawId);
                 wanted.add(id);
                 await ref.doc(id).set(item, {
                     merge: true
