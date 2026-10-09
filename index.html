@@ -2305,9 +2305,6 @@
             <form id="authForm" class="auth-form" onsubmit="submitAuth(event)">
                 <div id="registerFields" style="display:none">
                     <div class="field"><label>NAMA PEMILIK / ADMIN *</label><input id="registerAdminName" type="text" autocomplete="name" placeholder="Nama lengkap pemilik/admin"></div>
-                    <div class="field"><label>NAMA WARUNG / USAHA *</label><input id="registerShopName" type="text" placeholder="Nama warung atau usaha"></div>
-                    <div class="field"><label>NOMOR TELEPON / WHATSAPP</label><input id="registerPhone" type="tel" autocomplete="tel" placeholder="08xxxxxxxxxx"></div>
-                    <div class="field"><label>ALAMAT USAHA</label><input id="registerAddress" type="text" autocomplete="street-address" placeholder="Alamat warung"></div>
                 </div>
                 <div class="field"><label>EMAIL</label><input id="authUsername" type="email" autocomplete="email" placeholder="nama@email.com" required></div>
                 <div class="field"><label>PASSWORD</label><div class="password-toggle-wrap"><input id="authPassword" type="password" autocomplete="current-password" minlength="6" placeholder="Minimal 6 karakter" required><button class="password-toggle" type="button" onclick="togglePasswordVisibility('authPassword', this)" aria-label="Tampilkan password" title="Tampilkan password"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
@@ -2870,11 +2867,7 @@
             if (!validEmail(email)) return showAuthMessage('Format email tidak valid.');
             if (p.length < 6) return showAuthMessage('Password minimal 6 karakter.');
             const registerAdminName = document.getElementById('registerAdminName')?.value.trim() || '';
-            const registerShopName = document.getElementById('registerShopName')?.value.trim() || '';
-            const registerPhone = document.getElementById('registerPhone')?.value.trim() || '';
-            const registerAddress = document.getElementById('registerAddress')?.value.trim() || '';
             if (authMode === 'register' && !registerAdminName) return showAuthMessage('Nama pemilik/admin wajib diisi.');
-            if (authMode === 'register' && !registerShopName) return showAuthMessage('Nama warung/usaha wajib diisi.');
             if (authMode === 'register' && p !== document.getElementById('authPassword2').value) return showAuthMessage('Konfirmasi password tidak sama.');
             const btn = document.getElementById('authSubmit');
             btn.disabled = true;
@@ -2888,7 +2881,6 @@
                     const shopId = 'shop_' + uid;
                     await fbFs.doc('users/' + uid).set({
                         uid, name: registerAdminName, email, role: 'admin', shopId,
-                        shopName: registerShopName, phone: registerPhone, address: registerAddress,
                         approved: false, disabled: false,
                         createdAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
