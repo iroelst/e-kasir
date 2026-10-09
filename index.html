@@ -4460,8 +4460,24 @@ let pendingPurchaseBahanId = null;
                 // Super Admin hanya mengelola akun pemilik/admin warung, bukan akun Kasir.
                 // Akun test lama dikecualikan agar tidak tercampur dengan pendaftar.
                 platformUsersCache = snap.docs
-                    .map(d => ({ id: d.id, ...d.data() }))
-                    .filter(u => u.id !== PLATFORM_OWNER_UID && u.id !== LEGACY_TEST_UID)
+                    .map(d => {
+                        const data = d.data() || {};
+                        // Akun test lama adalah Admin Warung untuk data toko/utama.
+                        // Tampilkan di panel Super Admin tanpa mengubah dokumen Firestore aslinya.
+                        if (d.id === LEGACY_TEST_UID) {
+                            return {
+                                id: d.id,
+                                ...data,
+                                role: data.role || 'admin',
+                                shopId: data.shopId || 'utama',
+                                shopName: data.shopName || 'Warung Test (data lama)',
+                                approved: true,
+                                disabled: data.disabled === true
+                            };
+                        }
+                        return { id: d.id, ...data };
+                    })
+                    .filter(u => u.id !== PLATFORM_OWNER_UID)
                     .filter(u => ['admin', 'owner', 'admin_warung', 'pemilik_warung'].includes(String(u.role || '').toLowerCase()));
 
                 const pending = platformUsersCache.filter(u => u.approved !== true && u.disabled !== true).length;
@@ -4519,6 +4535,8 @@ let pendingPurchaseBahanId = null;
 
         async function setPlatformUserState(uid, action) {
             if (!currentUser || currentUser.uid !== PLATFORM_OWNER_UID) return toast('Akses khusus Super Admin.');
+            // Lindungi akun test lama dan data toko/utama dari perubahan tidak sengaja.
+            if (uid === LEGACY_TEST_UID) return toast('Akun test warung lama dilindungi dan tidak dapat diubah dari panel ini.');
             if (!['approve','disable','enable'].includes(action)) return;
             try {
                 const ref = fbFs.doc('users/' + uid);
