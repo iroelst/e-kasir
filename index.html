@@ -2244,6 +2244,17 @@
             <div class="auth-foot">Akun dan password dikelola oleh cloud.<br>Data setiap akun dibuat terpisah.</div>
         </div>
     </div>
+    <section id="platformOwnerScreen" style="display:none;min-height:100vh;background:var(--bg,#f5f7fb);padding:clamp(16px,4vw,36px);box-sizing:border-box">
+      <div style="max-width:1100px;margin:0 auto">
+        <header style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:22px">
+          <div><div style="font-size:13px;color:var(--muted,#64748b);font-weight:700">e-KASIR · PANEL PLATFORM</div><h1 style="margin:6px 0 4px">🛡️ User Admin Warung</h1><div style="color:var(--muted,#64748b)">Kelola pendaftaran dan akses pemilik warung.</div></div>
+          <button class="btn" onclick="logout()">Keluar</button>
+        </header>
+        <div class="card" style="padding:18px;margin-bottom:18px"><div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between"><div><b>Akun terdaftar</b><div id="platformUserSummary" style="color:var(--muted,#64748b);font-size:13px;margin-top:5px">Memuat data...</div></div><button class="btn primary" onclick="loadPlatformUsers()">↻ Muat Ulang</button></div></div>
+        <div id="platformUsersList" class="card" style="padding:18px"><div class="empty">Memuat daftar akun...</div></div>
+        <p style="font-size:12px;color:var(--muted,#64748b);margin-top:14px">Password asli tidak dapat dibaca dari Firebase Authentication. Gunakan proses reset password jika pengguna lupa password.</p>
+      </div>
+    </section>
     <div class="app">
         <aside class="sidebar">
             <div class="brand">
@@ -2824,6 +2835,15 @@
                 return;
             }
             localStorage.setItem(AUTH_KEY, JSON.stringify({ uid: user.uid, email: user.email }));
+            if (user.uid === PLATFORM_OWNER_UID) {
+                document.getElementById('authScreen').style.display = 'none';
+                document.querySelector('.app').style.display = 'none';
+                document.getElementById('platformOwnerScreen').style.display = 'block';
+                await loadPlatformUsers();
+                return;
+            }
+            document.getElementById('platformOwnerScreen').style.display = 'none';
+            document.querySelector('.app').style.display = '';
             const local = JSON.parse(localStorage.getItem(KEY) || 'null');
             db = local || blankDb();
             normalizeDb();
@@ -3052,6 +3072,8 @@
             currentUserName = '';
             KEY = BASE_KEY;
             db = blankDb();
+            document.getElementById('platformOwnerScreen').style.display = 'none';
+            document.querySelector('.app').style.display = '';
             document.getElementById('authScreen').style.display = 'grid';
             document.getElementById('authUsername').value = '';
             document.getElementById('authPassword').value = '';
@@ -4344,6 +4366,69 @@ let pendingPurchaseBahanId = null;
             w.focus();
             setTimeout(() => w.print(), 250);
             closeModal();
+        }
+
+        async function loadPlatformUsers() {
+            const list = document.getElementById('platformUsersList');
+            const summary = document.getElementById('platformUserSummary');
+            if (!currentUser || currentUser.uid !== PLATFORM_OWNER_UID || !firebaseReady) return;
+            list.innerHTML = '<div class="empty">Memuat daftar akun...</div>';
+            try {
+                const snap = await fbFs.collection('users').get();
+                const users = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(u => u.id !== PLATFORM_OWNER_UID);
+                const pending = users.filter(u => u.role === 'admin' && u.approved !== true && u.disabled !== true).length;
+                summary.textContent = `${users.length} akun warung/kasir · ${pending} menunggu persetujuan`;
+                if (!users.length) { list.innerHTML = '<div class="empty">Belum ada akun warung yang terdaftar.</div>'; return; }
+                list.innerHTML = users.map(u => {
+                    const name = escapeHtml(u.name || u.nama || 'Belum mengisi nama');
+                    const email = escapeHtml(u.email || 'Email tidak tersedia');
+                    const shop = escapeHtml(u.shopName || u.shopId || 'Belum ditentukan');
+                    const approved = u.approved === true;
+                    const disabled = u.disabled === true;
+                    const status = disabled ? 'Nonaktif' : (approved ? 'Disetujui' : 'Menunggu persetujuan');
+                    const action = u.role === 'admin'
+                      ? (disabled
+                        ? `<button class="btn" onclick="setPlatformUserState('${u.id}','enable')">Aktifkan</button>`
+                        : (approved
+                          ? `<button class="btn" onclick="setPlatformUserState('${u.id}','disable')">Nonaktifkan</button>`
+                          : `<button class="btn primary" onclick="setPlatformUserState('${u.id}','approve')">Setujui</button> <button class="btn" onclick="setPlatformUserState('${u.id}','disable')">Tolak / Nonaktifkan</button>`))
+                      : `<span style="font-size:12px;color:var(--muted,#64748b)">${escapeHtml(u.role || 'Role belum diatur')}</span>`;
+                    return `<div style="display:flex;gap:14px;justify-content:space-between;align-items:center;flex-wrap:wrap;padding:14px 0;border-bottom:1px solid var(--border,#e5e7eb)"><div style="min-width:220px;flex:1"><b>${name}</b><div style="font-size:13px;margin-top:4px">${email}</div><div style="font-size:12px;color:var(--muted,#64748b);margin-top:4px">Warung: ${shop} · ${status}</div></div><div style="display:flex;gap:8px;flex-wrap:wrap">${action}</div></div>`;
+                }).join('');
+            } catch (e) {
+                console.error('loadPlatformUsers:', e);
+                summary.textContent = 'Gagal memuat akun.';
+                list.innerHTML = `<div class="empty">Daftar akun tidak dapat dimuat: ${escapeHtml(e.message || 'Periksa Firestore Rules.')}</div>`;
+            }
+        }
+
+        async function setPlatformUserState(uid, action) {
+            if (!currentUser || currentUser.uid !== PLATFORM_OWNER_UID) return toast('Akses khusus pemilik aplikasi.');
+            if (!['approve','disable','enable'].includes(action)) return;
+            try {
+                const ref = fbFs.doc('users/' + uid);
+                const snap = await ref.get();
+                if (!snap.exists) return toast('Akun tidak ditemukan.');
+                const u = snap.data() || {};
+                const update = { updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+                if (action === 'approve') {
+                    update.approved = true;
+                    update.disabled = false;
+                    if (!u.shopId) update.shopId = 'shop_' + uid;
+                } else if (action === 'disable') {
+                    update.disabled = true;
+                } else {
+                    update.disabled = false;
+                    if (u.role === 'admin' && u.approved !== true) update.approved = true;
+                    if (!u.shopId && u.role === 'admin') update.shopId = 'shop_' + uid;
+                }
+                await ref.update(update);
+                toast(action === 'approve' ? 'Akun warung disetujui.' : action === 'disable' ? 'Akun dinonaktifkan.' : 'Akun diaktifkan.');
+                await loadPlatformUsers();
+            } catch (e) {
+                console.error('setPlatformUserState:', e);
+                toast('Gagal mengubah akun: ' + (e.message || 'Periksa Firestore Rules.'));
+            }
         }
 
         function renderAll() {
