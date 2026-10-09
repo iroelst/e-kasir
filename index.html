@@ -2218,6 +2218,67 @@
     border-radius: 13px;
 }
 
+
+/* ===== SUPER ADMIN MODERN PANEL ===== */
+#platformOwnerScreen{
+  background:
+    radial-gradient(ellipse at 8% 0%, rgba(59,130,246,.10), transparent 36%),
+    linear-gradient(180deg,#f7f9fc 0%,#eef2f8 100%) !important;
+  color:#172033;
+}
+#platformOwnerScreen .platform-heading{display:flex;align-items:center;gap:14px}
+#platformOwnerScreen .platform-shield{
+  width:54px;height:54px;display:grid;place-items:center;border-radius:17px;
+  color:#2563eb;background:linear-gradient(145deg,#eaf2ff,#dce8ff);
+  box-shadow:inset 0 1px 0 #fff,0 8px 20px rgba(37,99,235,.12);font-size:27px;
+}
+#platformOwnerScreen .platform-kicker{letter-spacing:.12em;text-transform:uppercase;font-size:11px!important;color:#64748b!important}
+#platformOwnerScreen .platform-panel-card{
+  background:rgba(255,255,255,.92);border:1px solid rgba(148,163,184,.22);
+  border-radius:22px;box-shadow:0 12px 35px rgba(15,23,42,.055);
+}
+#platformOwnerScreen .platform-stat-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}
+#platformOwnerScreen .platform-stat{padding:17px;border:1px solid #e8edf5;border-radius:17px;background:linear-gradient(145deg,#fff,#f8faff)}
+#platformOwnerScreen .platform-stat-label{font-size:12px;color:#64748b;font-weight:600}
+#platformOwnerScreen .platform-stat-value{font-size:25px;line-height:1.25;font-weight:800;color:#172033;margin-top:7px}
+#platformOwnerScreen .platform-search{
+  width:100%;box-sizing:border-box;border:1px solid #dce3ed;border-radius:13px;padding:13px 15px;
+  outline:none;background:#fff;color:#172033;font:inherit;min-height:46px
+}
+#platformOwnerScreen .platform-search:focus{border-color:#6d9cf8;box-shadow:0 0 0 4px rgba(59,130,246,.11)}
+#platformOwnerScreen .platform-user-card{
+  display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;
+  padding:17px;border:1px solid #e8edf4;border-radius:17px;background:#fff;margin-top:11px;
+  transition:box-shadow .18s,border-color .18s
+}
+#platformOwnerScreen .platform-user-card:hover{border-color:#cddcf6;box-shadow:0 8px 22px rgba(15,23,42,.055)}
+#platformOwnerScreen .platform-user-main{display:flex;gap:12px;align-items:flex-start;min-width:0;flex:1}
+#platformOwnerScreen .platform-user-avatar{
+  flex:0 0 44px;width:44px;height:44px;border-radius:14px;display:grid;place-items:center;
+  background:linear-gradient(145deg,#eaf2ff,#dbeafe);color:#2458b9;font-size:20px;font-weight:800
+}
+#platformOwnerScreen .platform-user-name{font-weight:800;font-size:16px;color:#182235;overflow-wrap:anywhere}
+#platformOwnerScreen .platform-user-email{font-size:13px;color:#596579;margin-top:4px;overflow-wrap:anywhere}
+#platformOwnerScreen .platform-user-meta{font-size:12px;color:#64748b;margin-top:7px;display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+#platformOwnerScreen .platform-status{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:700}
+#platformOwnerScreen .platform-status:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+#platformOwnerScreen .platform-status.pending{background:#fff4df;color:#a16207}
+#platformOwnerScreen .platform-status.approved{background:#e8f8ef;color:#15803d}
+#platformOwnerScreen .platform-status.disabled{background:#feecec;color:#b91c1c}
+#platformOwnerScreen .platform-actions{display:flex;gap:8px;flex-wrap:wrap}
+#platformOwnerScreen .platform-actions .btn{border-radius:11px!important;min-height:40px;padding:9px 13px!important}
+#platformOwnerScreen .platform-primary{background:#2563eb!important;color:#fff!important;border-color:#2563eb!important}
+#platformOwnerScreen .platform-empty{padding:30px 18px;text-align:center;color:#64748b;border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc}
+@media(max-width:600px){
+ #platformOwnerScreen .platform-stat-grid{gap:8px}
+ #platformOwnerScreen .platform-stat{padding:12px}
+ #platformOwnerScreen .platform-stat-value{font-size:22px}
+ #platformOwnerScreen .platform-user-card{align-items:stretch}
+ #platformOwnerScreen .platform-actions{width:100%}
+ #platformOwnerScreen .platform-actions .btn{flex:1}
+ #platformOwnerScreen .platform-shield{width:46px;height:46px;border-radius:14px}
+}
+
 </style>
 </head>
 
@@ -2244,15 +2305,34 @@
             <div class="auth-foot">Akun dan password dikelola oleh cloud.<br>Data setiap akun dibuat terpisah.</div>
         </div>
     </div>
-    <section id="platformOwnerScreen" style="display:none;min-height:100vh;background:var(--bg,#f5f7fb);padding:clamp(16px,4vw,36px);box-sizing:border-box">
+    <section id="platformOwnerScreen" style="display:none;min-height:100vh;padding:clamp(16px,4vw,36px);box-sizing:border-box">
       <div style="max-width:1100px;margin:0 auto">
-        <header style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:22px">
-          <div><div style="font-size:13px;color:var(--muted,#64748b);font-weight:700">e-KASIR · PANEL SUPER ADMIN</div><h1 style="margin:6px 0 4px">🛡️ User Admin Warung</h1><div style="color:var(--muted,#64748b)">Kelola pendaftaran dan akses pemilik warung.</div></div>
-          <button class="btn" onclick="logout()">Keluar</button>
+        <header style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:25px">
+          <div class="platform-heading">
+            <div class="platform-shield">🛡️</div>
+            <div>
+              <div class="platform-kicker">e-KASIR · PANEL SUPER ADMIN</div>
+              <h1 style="margin:5px 0 3px;font-size:clamp(25px,4vw,34px);letter-spacing:-.035em">User Admin Warung</h1>
+              <div style="color:#64748b;font-size:14px">Kelola pendaftaran dan akses pemilik warung.</div>
+            </div>
+          </div>
+          <button class="btn" style="border-radius:12px;padding:11px 16px" onclick="logout()">↪ Keluar</button>
         </header>
-        <div class="card" style="padding:18px;margin-bottom:18px"><div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between"><div><b>Akun terdaftar</b><div id="platformUserSummary" style="color:var(--muted,#64748b);font-size:13px;margin-top:5px">Memuat data...</div></div><button class="btn primary" onclick="loadPlatformUsers()">↻ Muat Ulang</button></div></div>
-        <div id="platformUsersList" class="card" style="padding:18px"><div class="empty">Memuat daftar akun...</div></div>
-        <p style="font-size:12px;color:var(--muted,#64748b);margin-top:14px">Password asli tidak dapat dibaca dari Firebase Authentication. Gunakan proses reset password jika pengguna lupa password.</p>
+        <div class="platform-stat-grid">
+          <div class="platform-stat"><div class="platform-stat-label">Total Admin Warung</div><div class="platform-stat-value" id="platformTotalCount">—</div></div>
+          <div class="platform-stat"><div class="platform-stat-label">Menunggu Persetujuan</div><div class="platform-stat-value" id="platformPendingCount" style="color:#b7791f">—</div></div>
+          <div class="platform-stat"><div class="platform-stat-label">Warung Aktif</div><div class="platform-stat-value" id="platformActiveCount" style="color:#15803d">—</div></div>
+        </div>
+        <div class="platform-panel-card" style="padding:18px;margin-bottom:16px">
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between;margin-bottom:14px">
+            <div><b style="font-size:17px">Pendaftaran Admin Warung</b><div id="platformUserSummary" style="color:#64748b;font-size:13px;margin-top:5px">Memuat data...</div></div>
+            <button class="btn platform-primary" onclick="loadPlatformUsers()">↻ Muat Ulang</button>
+          </div>
+          <input id="platformUserSearch" class="platform-search" type="search" placeholder="Cari nama, email, atau nama warung..." oninput="renderPlatformUsersFiltered()">
+          <div style="font-size:12px;color:#64748b;margin-top:9px">Hanya akun Admin/Pemilik Warung ditampilkan. Akun Kasir tidak memerlukan persetujuan Super Admin.</div>
+        </div>
+        <div id="platformUsersList" class="platform-panel-card" style="padding:10px 16px"><div class="platform-empty">Memuat daftar admin warung...</div></div>
+        <p style="font-size:12px;color:#64748b;margin:14px 3px 0;line-height:1.6">Password asli tidak dapat dibaca dari Firebase Authentication. Gunakan proses reset password jika pengguna lupa password.</p>
       </div>
     </section>
     <div class="app">
@@ -2748,7 +2828,7 @@
             document.getElementById('tabLogin').classList.toggle('active', mode === 'login');
             document.getElementById('tabRegister').classList.toggle('active', mode === 'register');
             document.getElementById('authTitle').textContent = mode === 'login' ? 'Masuk' : 'Buat Akun';
-            document.getElementById('authSubtitle').textContent = mode === 'login' ? 'Masuk menggunakan email dan password Anda.' : 'Buat akun baru untuk menggunakan e-Kasir.';
+            document.getElementById('authSubtitle').textContent = mode === 'login' ? 'Masuk menggunakan email dan password Anda.' : 'Daftarkan akun Admin/Pemilik Warung untuk menggunakan e-Kasir.';
             document.getElementById('authSubmit').textContent = mode === 'login' ? 'Masuk' : 'Daftar';
             document.getElementById('authConfirmWrap').style.display = mode === 'register' ? 'grid' : 'none';
             document.getElementById('authMsg').className = 'auth-msg'
@@ -2781,7 +2861,7 @@
                     currentUser = null; currentRole = '';
                     localStorage.removeItem(AUTH_KEY);
                     document.getElementById('authScreen').style.display = 'grid';
-                    showAuthMessage('Pendaftaran berhasil. Akun Anda menunggu persetujuan Admin. Silakan login setelah akun disetujui.', 'ok');
+                    showAuthMessage('Pendaftaran berhasil. Akun Anda menunggu persetujuan Super Admin. Silakan login setelah akun disetujui.', 'ok');
                 } else {
                     cred = await fbAuth.signInWithEmailAndPassword(email, p);
                     await finishFirebaseLogin(cred.user);
@@ -4368,38 +4448,73 @@ let pendingPurchaseBahanId = null;
             closeModal();
         }
 
+        let platformUsersCache = [];
+
         async function loadPlatformUsers() {
             const list = document.getElementById('platformUsersList');
             const summary = document.getElementById('platformUserSummary');
             if (!currentUser || currentUser.uid !== PLATFORM_OWNER_UID || !firebaseReady) return;
-            list.innerHTML = '<div class="empty">Memuat daftar akun...</div>';
+            list.innerHTML = '<div class="platform-empty">Memuat daftar admin warung...</div>';
             try {
                 const snap = await fbFs.collection('users').get();
-                const users = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(u => u.id !== PLATFORM_OWNER_UID);
-                const pending = users.filter(u => u.role === 'admin' && u.approved !== true && u.disabled !== true).length;
-                summary.textContent = `${users.length} akun warung/kasir · ${pending} menunggu persetujuan`;
-                if (!users.length) { list.innerHTML = '<div class="empty">Belum ada akun warung yang terdaftar.</div>'; return; }
-                list.innerHTML = users.map(u => {
-                    const name = escapeHtml(u.name || u.nama || 'Belum mengisi nama');
-                    const email = escapeHtml(u.email || 'Email tidak tersedia');
-                    const shop = escapeHtml(u.shopName || u.shopId || 'Belum ditentukan');
-                    const approved = u.approved === true;
-                    const disabled = u.disabled === true;
-                    const status = disabled ? 'Nonaktif' : (approved ? 'Disetujui' : 'Menunggu persetujuan');
-                    const action = u.role === 'admin'
-                      ? (disabled
-                        ? `<button class="btn" onclick="setPlatformUserState('${u.id}','enable')">Aktifkan</button>`
-                        : (approved
-                          ? `<button class="btn" onclick="setPlatformUserState('${u.id}','disable')">Nonaktifkan</button>`
-                          : `<button class="btn primary" onclick="setPlatformUserState('${u.id}','approve')">Setujui</button> <button class="btn" onclick="setPlatformUserState('${u.id}','disable')">Tolak / Nonaktifkan</button>`))
-                      : `<span style="font-size:12px;color:var(--muted,#64748b)">${escapeHtml(u.role || 'Role belum diatur')}</span>`;
-                    return `<div style="display:flex;gap:14px;justify-content:space-between;align-items:center;flex-wrap:wrap;padding:14px 0;border-bottom:1px solid var(--border,#e5e7eb)"><div style="min-width:220px;flex:1"><b>${name}</b><div style="font-size:13px;margin-top:4px">${email}</div><div style="font-size:12px;color:var(--muted,#64748b);margin-top:4px">Warung: ${shop} · ${status}</div></div><div style="display:flex;gap:8px;flex-wrap:wrap">${action}</div></div>`;
-                }).join('');
+                // Super Admin hanya mengelola akun pemilik/admin warung, bukan akun Kasir.
+                // Akun test lama dikecualikan agar tidak tercampur dengan pendaftar.
+                platformUsersCache = snap.docs
+                    .map(d => ({ id: d.id, ...d.data() }))
+                    .filter(u => u.id !== PLATFORM_OWNER_UID && u.id !== LEGACY_TEST_UID)
+                    .filter(u => ['admin', 'owner', 'admin_warung', 'pemilik_warung'].includes(String(u.role || '').toLowerCase()));
+
+                const pending = platformUsersCache.filter(u => u.approved !== true && u.disabled !== true).length;
+                const active = platformUsersCache.filter(u => u.approved === true && u.disabled !== true).length;
+                document.getElementById('platformTotalCount').textContent = platformUsersCache.length;
+                document.getElementById('platformPendingCount').textContent = pending;
+                document.getElementById('platformActiveCount').textContent = active;
+                summary.textContent = `${platformUsersCache.length} admin warung · ${pending} menunggu persetujuan`;
+                renderPlatformUsersFiltered();
             } catch (e) {
                 console.error('loadPlatformUsers:', e);
                 summary.textContent = 'Gagal memuat akun.';
-                list.innerHTML = `<div class="empty">Daftar akun tidak dapat dimuat: ${escapeHtml(e.message || 'Periksa Firestore Rules.')}</div>`;
+                list.innerHTML = `<div class="platform-empty">Daftar admin warung tidak dapat dimuat: ${escapeHtml(e.message || 'Periksa Firestore Rules.')}</div>`;
             }
+        }
+
+        function renderPlatformUsersFiltered() {
+            const list = document.getElementById('platformUsersList');
+            if (!list) return;
+            const q = String(document.getElementById('platformUserSearch')?.value || '').trim().toLowerCase();
+            const users = platformUsersCache.filter(u => {
+                const text = [u.name, u.nama, u.email, u.shopName, u.shopId].join(' ').toLowerCase();
+                return !q || text.includes(q);
+            });
+            if (!users.length) {
+                list.innerHTML = `<div class="platform-empty">${platformUsersCache.length ? 'Tidak ada akun yang cocok dengan pencarian.' : 'Belum ada pendaftaran Admin Warung.'}</div>`;
+                return;
+            }
+            list.innerHTML = users.map(u => {
+                const name = escapeHtml(u.name || u.nama || 'Belum mengisi nama');
+                const email = escapeHtml(u.email || 'Email tidak tersedia');
+                const shop = escapeHtml(u.shopName || u.shopId || 'Belum ditentukan');
+                const approved = u.approved === true;
+                const disabled = u.disabled === true;
+                const status = disabled ? 'Nonaktif' : (approved ? 'Disetujui' : 'Menunggu persetujuan');
+                const statusClass = disabled ? 'disabled' : (approved ? 'approved' : 'pending');
+                const action = disabled
+                    ? `<button class="btn" onclick="setPlatformUserState('${u.id}','enable')">Aktifkan</button>`
+                    : (approved
+                        ? `<button class="btn" onclick="setPlatformUserState('${u.id}','disable')">Nonaktifkan</button>`
+                        : `<button class="btn platform-primary" onclick="setPlatformUserState('${u.id}','approve')">✓ Setujui</button><button class="btn" onclick="setPlatformUserState('${u.id}','disable')">Tolak</button>`);
+                return `<article class="platform-user-card">
+                    <div class="platform-user-main">
+                      <div class="platform-user-avatar">${escapeHtml((u.name || u.nama || u.email || 'W').trim().charAt(0).toUpperCase())}</div>
+                      <div style="min-width:0;flex:1">
+                        <div class="platform-user-name">${name}</div>
+                        <div class="platform-user-email">${email}</div>
+                        <div class="platform-user-meta"><span>🏪 ${shop}</span><span>·</span><span class="platform-status ${statusClass}">${status}</span></div>
+                      </div>
+                    </div>
+                    <div class="platform-actions">${action}</div>
+                </article>`;
+            }).join('');
         }
 
         async function setPlatformUserState(uid, action) {
@@ -4410,6 +4525,10 @@ let pendingPurchaseBahanId = null;
                 const snap = await ref.get();
                 if (!snap.exists) return toast('Akun tidak ditemukan.');
                 const u = snap.data() || {};
+                // Lindungi dari perubahan akun Kasir atau akun di luar peran pemilik warung.
+                if (!['admin', 'owner', 'admin_warung', 'pemilik_warung'].includes(String(u.role || '').toLowerCase())) {
+                    return toast('Akun ini bukan Admin/Pemilik Warung.');
+                }
                 const update = { updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
                 if (action === 'approve') {
                     update.approved = true;
@@ -4419,11 +4538,11 @@ let pendingPurchaseBahanId = null;
                     update.disabled = true;
                 } else {
                     update.disabled = false;
-                    if (u.role === 'admin' && u.approved !== true) update.approved = true;
-                    if (!u.shopId && u.role === 'admin') update.shopId = 'shop_' + uid;
+                    if (u.approved !== true) update.approved = true;
+                    if (!u.shopId) update.shopId = 'shop_' + uid;
                 }
                 await ref.update(update);
-                toast(action === 'approve' ? 'Akun warung disetujui.' : action === 'disable' ? 'Akun dinonaktifkan.' : 'Akun diaktifkan.');
+                toast(action === 'approve' ? 'Admin Warung disetujui.' : action === 'disable' ? 'Akun Admin Warung dinonaktifkan.' : 'Akun Admin Warung diaktifkan.');
                 await loadPlatformUsers();
             } catch (e) {
                 console.error('setPlatformUserState:', e);
