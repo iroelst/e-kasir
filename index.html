@@ -2319,7 +2319,7 @@
       <div style="max-width:1100px;margin:0 auto">
         <header style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:25px">
           <div class="platform-heading">
-            <div class="platform-shield">🛡️</div>
+            <div class="platform-shield"><img src="./logo-192.png?v=2" alt="Logo e-Kasir Super Admin" style="width:100%;height:100%;object-fit:contain;border-radius:14px;display:block"></div>
             <div>
               <div class="platform-kicker">e-KASIR · PANEL SUPER ADMIN</div>
               <h1 style="margin:5px 0 3px;font-size:clamp(25px,4vw,34px);letter-spacing:-.035em">User Admin Warung</h1>
@@ -2461,7 +2461,7 @@
                                     <th>HPP</th>
                                     <th>Laba</th>
                                     <th>Status</th>
-                                    <th></th>
+                                    <th>Aksi</th>
                                 </tr>
                             </thead>
                             <tbody id="menuTable"></tbody>
@@ -3833,7 +3833,7 @@ let pendingPurchaseBahanId = null;
                 usageTotal += uv;
                 endingTotal += ev;
                 const safe = x.ending > (+b.min || 0);
-                return `<tr><td><b>${b.name}</b></td><td>${formatQty(b.content)} ${b.unit}</td><td>${rupiah(b.cost)}</td><td>${formatQty(x.opening)} ${b.unit}</td><td>${formatQty(x.purchases)} ${b.unit}</td><td>${formatQty(x.used)} ${b.unit}</td><td><b>${formatQty(Math.max(0,x.ending))} ${b.unit}</b></td><td><b>${rupiah(ev)}</b></td><td><span class="badge ${safe?'ok':'warn'}">${safe?'Aman':'Menipis'}</span></td><td><button class="btn" onclick="editBahan(${b.id})">Edit</button></td></tr>`
+                return `<tr><td><b>${b.name}</b></td><td>${formatQty(b.content)} ${b.unit}</td><td>${rupiah(b.cost)}</td><td>${formatQty(x.opening)} ${b.unit}</td><td>${formatQty(x.purchases)} ${b.unit}</td><td>${formatQty(x.used)} ${b.unit}</td><td><b>${formatQty(Math.max(0,x.ending))} ${b.unit}</b></td><td><b>${rupiah(ev)}</b></td><td><span class="badge ${safe?'ok':'warn'}">${safe?'Aman':'Menipis'}</span></td><td><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn" onclick="editBahan(${b.id})">Edit</button><button class="btn danger" onclick="clearStockOpening(${b.id})" title="Hapus stok awal bahan ini pada periode aktif">🗑️ Hapus</button></div></td></tr>`
             }).join('') || '<tr><td colspan="10"><div class="empty">Belum ada bahan. Tambahkan bahan terlebih dahulu.</div></td></tr>';
             stockOpeningTotal.textContent = rupiah(openingTotal);
             stockPurchaseTotal.textContent = rupiah(purchaseTotal);
@@ -3843,6 +3843,25 @@ let pendingPurchaseBahanId = null;
             purchaseTable.innerHTML = rangePurchases(r.from, r.to).slice().reverse().map(m => `<tr><td>${m.date}</td><td><b>${m.bahanName}</b></td><td>${formatQty(m.packages||0)} kemasan</td><td>${formatQty(m.qty)} ${m.unit}</td><td>${rupiah(m.cost)}</td><td>${rupiah(m.total)}</td><td>${m.note||'-'}</td><td><div style="display:flex;gap:6px"><button class="btn" title="Edit pembelian" onclick="openPurchaseModal(${m.id})">✏️ Edit</button><button class="btn" title="Hapus pembelian" onclick="deletePurchase(${m.id})">🗑️ Hapus</button></div></td></tr>`).join('') || '<tr><td colspan="8"><div class="empty">Belum ada pembelian pada periode ini.</div></td></tr>';
             document.getElementById('stockFrom').value = r.from;
             document.getElementById('stockTo').value = r.to;
+        }
+
+        // Menghapus hanya nilai stok awal bahan terpilih pada periode aktif.
+        // Tidak menghapus bahan, pembelian, transaksi, resep, atau data warung lain.
+        function clearStockOpening(bahanId) {
+            const b = db.bahan.find(x => +x.id === +bahanId);
+            if (!b) return toast('Bahan tidak ditemukan');
+            const r = getRange();
+            const key = rangeKey(r.from, r.to);
+            const p = ensurePeriod(key, r.from, r.to);
+            const current = +(p.opening?.[bahanId] ?? 0);
+            if (!current) return toast('Stok awal bahan ini sudah kosong pada periode aktif');
+            if (!confirm(`Hapus stok awal ${b.name} sebesar ${formatQty(current)} ${b.unit} untuk periode ${r.from} sampai ${r.to}? Pembelian dan pemakaian tetap dipertahankan.`)) return;
+            if (!p.opening) p.opening = {};
+            p.opening[bahanId] = 0;
+            if (p.ending) delete p.ending[bahanId];
+            save();
+            renderAll();
+            toast('Stok awal berhasil dihapus untuk periode aktif');
         }
 
         function changeStockRange() {
