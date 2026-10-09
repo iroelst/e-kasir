@@ -2625,7 +2625,9 @@
             messagingSenderId: "603460538194",
             appId: "1:603460538194:web:b589708325a77deb7a748b",
         };
-        const SHOP_ID = 'utama';
+        const PLATFORM_OWNER_UID = 'Cmd0W9M8rofGbAcFkRLcfgmT2Lb2';
+        const LEGACY_TEST_UID = 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2';
+        let SHOP_ID = 'utama';
         const BASE_KEY = 'ekasir_firebase_v1';
         const AUTH_KEY = 'ekasir_firebase_session';
         let currentUser = null,
@@ -2728,6 +2730,7 @@
             }
         }
         let authMode = 'login';
+        let registrationInProgress = false;
 
         function switchAuth(mode) {
             authMode = mode;
@@ -2752,14 +2755,31 @@
             btn.textContent = 'Memproses...';
             try {
                 let cred;
-                if (authMode === 'register') cred = await fbAuth.createUserWithEmailAndPassword(email, p);
-                else cred = await fbAuth.signInWithEmailAndPassword(email, p);
-                await finishFirebaseLogin(cred.user);
-                if (authMode === 'register') showAuthMessage('Akun berhasil dibuat.', 'ok')
+                if (authMode === 'register') {
+                    registrationInProgress = true;
+                    cred = await fbAuth.createUserWithEmailAndPassword(email, p);
+                    const uid = cred.user.uid;
+                    const shopId = 'shop_' + uid;
+                    await fbFs.doc('users/' + uid).set({
+                        uid, name: email.split('@')[0], email, role: 'admin', shopId,
+                        shopName: email.split('@')[0], approved: false, disabled: false,
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    try { await fbAuth.signOut(); } catch (_) {}
+                    registrationInProgress = false;
+                    currentUser = null; currentRole = '';
+                    localStorage.removeItem(AUTH_KEY);
+                    document.getElementById('authScreen').style.display = 'grid';
+                    showAuthMessage('Pendaftaran berhasil. Akun Anda menunggu persetujuan Admin. Silakan login setelah akun disetujui.', 'ok');
+                } else {
+                    cred = await fbAuth.signInWithEmailAndPassword(email, p);
+                    await finishFirebaseLogin(cred.user);
+                }
             } catch (e) {
                 let m = e.code === 'auth/email-already-in-use' ? 'Email sudah terdaftar.' : e.code === 'auth/invalid-credential' ? 'Email atau password salah.' : e.code === 'auth/wrong-password' ? 'Email atau password salah.' : e.code === 'auth/too-many-requests' ? 'Terlalu banyak percobaan. Coba lagi nanti.' : (e.message || 'Login gagal');
                 showAuthMessage(m)
             } finally {
+                registrationInProgress = false;
                 btn.disabled = false;
                 btn.textContent = authMode === 'login' ? 'Masuk' : 'Daftar'
             }
@@ -2768,34 +2788,45 @@
             currentUser = user;
             currentUserName = user.displayName || (user.email ? user.email.split('@')[0] : '') || 'User';
             KEY = BASE_KEY + '_' + user.uid;
-            localStorage.setItem(AUTH_KEY, JSON.stringify({
-                uid: user.uid,
-                email: user.email
-            }));
+            try {
+                const p = await fbFs.doc('users/' + user.uid).get();
+                const isPlatformOwner = user.uid === PLATFORM_OWNER_UID;
+                const isLegacyTest = user.uid === LEGACY_TEST_UID;
+                let profile = p.exists ? (p.data() || {}) : {};
+
+                // Akun pemilik platform dan akun uji lama dipertahankan; semua akun baru
+                // wajib memiliki profil, persetujuan eksplisit, dan status aktif.
+                if (!isPlatformOwner && !isLegacyTest && !p.exists) {
+                    throw new Error('Profil akun belum tersedia. Hubungi Admin.');
+                }
+                if (!isPlatformOwner && !isLegacyTest && profile.approved !== true) {
+                    throw new Error('Akun Anda masih menunggu persetujuan Admin.');
+                }
+                if (!isPlatformOwner && profile.disabled === true) {
+                    throw new Error('Akun Anda sedang dinonaktifkan. Hubungi Admin.');
+                }
+                if (isLegacyTest && !p.exists) profile = { role: 'admin', shopId: 'utama', name: currentUserName };
+                if (isPlatformOwner && !p.exists) profile = { role: 'admin', shopId: 'utama', name: currentUserName, approved: true };
+
+                currentRole = (isPlatformOwner || isLegacyTest) ? 'admin' : (profile.role || '');
+                if (!['admin', 'kasir'].includes(currentRole)) throw new Error('Role akun belum diatur. Hubungi Admin.');
+                SHOP_ID = (isPlatformOwner || isLegacyTest) ? 'utama' : String(profile.shopId || '');
+                if (!SHOP_ID) throw new Error('ID warung belum diatur pada profil akun. Hubungi Admin.');
+                currentUserName = String(profile.name || profile.displayName || currentUserName || 'User').trim() || 'User';
+            } catch (e) {
+                console.error('load user profile:', e);
+                currentUser = null;
+                currentRole = '';
+                localStorage.removeItem(AUTH_KEY);
+                try { await fbAuth.signOut(); } catch (_) {}
+                document.getElementById('authScreen').style.display = 'grid';
+                showAuthMessage(e.message || 'Akun tidak dapat masuk. Periksa status persetujuan dan profil akun.');
+                return;
+            }
+            localStorage.setItem(AUTH_KEY, JSON.stringify({ uid: user.uid, email: user.email }));
             const local = JSON.parse(localStorage.getItem(KEY) || 'null');
             db = local || blankDb();
             normalizeDb();
-            try {
-                const p = await fbFs.doc('users/' + user.uid).get();
-                if (p.exists) {
-                    const profile = p.data() || {};
-                    if (profile.disabled === true && user.uid !== 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2') {
-                        currentUser = null;
-                        currentRole = '';
-                        localStorage.removeItem(AUTH_KEY);
-                        try { await fbAuth.signOut(); } catch (e) {}
-                        document.getElementById('authScreen').style.display = 'grid';
-                        showAuthMessage('Akun Anda sedang dinonaktifkan. Hubungi Admin.');
-                        return;
-                    }
-                    currentRole = profile.role || '';
-                    currentUserName = String(profile.name || profile.displayName || currentUserName || 'User').trim() || 'User';
-                } else if (user.uid === 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2') currentRole = 'admin';
-                else currentRole = '';
-            } catch (e) {
-                console.error('load user profile:', e);
-                currentRole = user.uid === 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2' ? 'admin' : ''
-            }
             document.getElementById('authScreen').style.display = 'none';
             renderUserChip();
             applyRoleAccess();
@@ -2804,11 +2835,11 @@
             await loadFirebaseData();
             applyRoleAccess();
             ensureAdminUserManagement();
-            renderAll()
+            renderAll();
         }
 
         function isAdminClient() {
-            return currentRole === 'admin' || currentUser?.uid === 'XgaiCBqUcYg9Zp5DLMTtjeRkC8B2'
+            return currentRole === 'admin' || currentUser?.uid === PLATFORM_OWNER_UID || currentUser?.uid === LEGACY_TEST_UID
         }
 
         function isKasirClient() {
@@ -3035,6 +3066,7 @@
                 return
             }
             fbAuth.onAuthStateChanged(async user => {
+                if (registrationInProgress) return;
                 if (!user) {
                     document.getElementById('authScreen').style.display = 'grid';
                     return
@@ -4374,7 +4406,7 @@ let pendingPurchaseBahanId = null;
 
         async function getKasirUsers() {
             if (!firebaseReady || !isAdminClient()) return [];
-            const snap = await fbFs.collection('users').where('role', '==', 'kasir').get();
+            const snap = await fbFs.collection('users').where('role', '==', 'kasir').where('shopId', '==', SHOP_ID).get();
             return snap.docs.map(d => ({ id: d.id, ...d.data() }));
         }
 
@@ -4447,6 +4479,9 @@ let pendingPurchaseBahanId = null;
                     name,
                     email,
                     role: 'kasir',
+                    shopId: SHOP_ID,
+                    shopName: db.settings?.name || 'Warung',
+                    approved: true,
                     disabled: false,
                     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                     createdBy: currentUser.uid
