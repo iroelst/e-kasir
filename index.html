@@ -2885,22 +2885,23 @@
                 const isLegacyTest = user.uid === LEGACY_TEST_UID;
                 let profile = p.exists ? (p.data() || {}) : {};
 
-                // Akun pemilik platform dan akun uji lama dipertahankan; semua akun baru
-                // wajib memiliki profil, persetujuan eksplisit, dan status aktif.
+                // Pemilik platform dan akun uji lama dipertahankan.
+                // Persetujuan Super Admin hanya diwajibkan untuk Admin Warung,
+                // bukan kasir yang dibuat oleh Admin Warung.
                 if (!isPlatformOwner && !isLegacyTest && !p.exists) {
                     throw new Error('Profil akun belum tersedia. Hubungi Admin.');
-                }
-                if (!isPlatformOwner && !isLegacyTest && profile.approved !== true) {
-                    throw new Error('Akun Anda masih menunggu persetujuan Admin.');
-                }
-                if (!isPlatformOwner && profile.disabled === true) {
-                    throw new Error('Akun Anda sedang dinonaktifkan. Hubungi Admin.');
                 }
                 if (isLegacyTest && !p.exists) profile = { role: 'admin', shopId: 'utama', name: currentUserName };
                 if (isPlatformOwner && !p.exists) profile = { role: 'admin', shopId: 'utama', name: currentUserName, approved: true };
 
-                currentRole = (isPlatformOwner || isLegacyTest) ? 'admin' : (profile.role || '');
+                currentRole = (isPlatformOwner || isLegacyTest) ? 'admin' : String(profile.role || '').toLowerCase();
                 if (!['admin', 'kasir'].includes(currentRole)) throw new Error('Role akun belum diatur. Hubungi Admin.');
+                if (!isPlatformOwner && profile.disabled === true) {
+                    throw new Error('Akun Anda sedang dinonaktifkan. Hubungi Admin.');
+                }
+                if (!isPlatformOwner && !isLegacyTest && currentRole === 'admin' && profile.approved !== true) {
+                    throw new Error('Akun Anda masih menunggu persetujuan Admin.');
+                }
                 SHOP_ID = (isPlatformOwner || isLegacyTest) ? 'utama' : String(profile.shopId || '');
                 if (!SHOP_ID) throw new Error('ID warung belum diatur pada profil akun. Hubungi Admin.');
                 currentUserName = String(profile.name || profile.displayName || currentUserName || 'User').trim() || 'User';
