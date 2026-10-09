@@ -2247,7 +2247,7 @@
     <section id="platformOwnerScreen" style="display:none;min-height:100vh;background:var(--bg,#f5f7fb);padding:clamp(16px,4vw,36px);box-sizing:border-box">
       <div style="max-width:1100px;margin:0 auto">
         <header style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:22px">
-          <div><div style="font-size:13px;color:var(--muted,#64748b);font-weight:700">e-KASIR · PANEL PLATFORM</div><h1 style="margin:6px 0 4px">🛡️ User Admin Warung</h1><div style="color:var(--muted,#64748b)">Kelola pendaftaran dan akses pemilik warung.</div></div>
+          <div><div style="font-size:13px;color:var(--muted,#64748b);font-weight:700">e-KASIR · PANEL SUPER ADMIN</div><h1 style="margin:6px 0 4px">🛡️ User Admin Warung</h1><div style="color:var(--muted,#64748b)">Kelola pendaftaran dan akses pemilik warung.</div></div>
           <button class="btn" onclick="logout()">Keluar</button>
         </header>
         <div class="card" style="padding:18px;margin-bottom:18px"><div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between"><div><b>Akun terdaftar</b><div id="platformUserSummary" style="color:var(--muted,#64748b);font-size:13px;margin-top:5px">Memuat data...</div></div><button class="btn primary" onclick="loadPlatformUsers()">↻ Muat Ulang</button></div></div>
@@ -4403,7 +4403,7 @@ let pendingPurchaseBahanId = null;
         }
 
         async function setPlatformUserState(uid, action) {
-            if (!currentUser || currentUser.uid !== PLATFORM_OWNER_UID) return toast('Akses khusus pemilik aplikasi.');
+            if (!currentUser || currentUser.uid !== PLATFORM_OWNER_UID) return toast('Akses khusus Super Admin.');
             if (!['approve','disable','enable'].includes(action)) return;
             try {
                 const ref = fbFs.doc('users/' + uid);
