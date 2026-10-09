@@ -4699,8 +4699,8 @@ let pendingPurchaseBahanId = null;
                 <div class="form-grid">
                     <div class="field full"><label>NAMA KASIR</label><input id="kasirName" required placeholder="Contoh: Budi"></div>
                     <div class="field full"><label>EMAIL</label><input id="kasirEmail" type="email" required placeholder="kasir@email.com"></div>
-                    <div class="field"><label>PASSWORD</label><input id="kasirPassword" type="password" minlength="6" required placeholder="Minimal 6 karakter"></div>
-                    <div class="field"><label>KONFIRMASI PASSWORD</label><input id="kasirPassword2" type="password" minlength="6" required placeholder="Ulangi password"></div>
+                    <div class="field"><label>PASSWORD</label><div class="password-toggle-wrap"><input id="kasirPassword" type="password" minlength="6" required placeholder="Minimal 6 karakter"><button class="password-toggle" type="button" onclick="togglePasswordVisibility('kasirPassword', this)" aria-label="Tampilkan password" title="Tampilkan password"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
+                    <div class="field"><label>KONFIRMASI PASSWORD</label><div class="password-toggle-wrap"><input id="kasirPassword2" type="password" minlength="6" required placeholder="Ulangi password"><button class="password-toggle" type="button" onclick="togglePasswordVisibility('kasirPassword2', this)" aria-label="Tampilkan konfirmasi password" title="Tampilkan password"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
                 </div>
                 <div class="hint" style="margin-top:12px">Role akan otomatis disimpan sebagai <b>Kasir</b>.</div>
                 <button id="saveKasirBtn" class="btn primary" style="width:100%;margin-top:15px" type="submit">Buat Akun Kasir</button>
