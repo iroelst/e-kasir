@@ -4410,7 +4410,18 @@ let pendingPurchaseBahanId = null;
             }
             w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>
  body{font-family:Arial,sans-serif;color:#111;margin:25px;font-size:12px}table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid #999;padding:6px;text-align:left}th{background:#f2f2f2}.num{text-align:right}.summary{margin-top:16px;display:flex;justify-content:flex-end}.summary table{width:360px}@media print{@page{size:A4;margin:10mm}body{margin:0}}
- </style></head><body>${body}</body></html>`);
+ </style></head><body>${body}
+    <script>
+      // PWA service worker for GitHub Pages project deployment.
+      if ('serviceWorker' in navigator && location.protocol === 'https:') {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('./service-worker.js')
+            .catch(error => console.warn('PWA service worker registration failed:', error));
+        });
+      }
+    </script>
+
+</body></html>`);
             w.document.close();
             w.focus();
             setTimeout(() => w.print(), 250);
