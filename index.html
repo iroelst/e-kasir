@@ -2285,10 +2285,31 @@
         .password-toggle:hover{background:var(--surface2);color:var(--text)}
         .password-toggle svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 
+
+/* Cegah form login/dashboard berkedip sebelum Firebase memulihkan sesi. */
+.auth-loading { position:fixed; inset:0; z-index:100000; display:none; place-items:center; padding:20px; background:linear-gradient(135deg,#111827 0%,#2b2118 100%); color:#172033; }
+body.auth-checking .auth-loading { display:grid; }
+body.auth-checking .auth-screen, body.auth-checking .app, body.auth-checking #platformOwnerScreen { display:none !important; }
+.auth-loading-card { width:min(320px,100%); padding:28px 24px; border-radius:22px; background:#fff; box-shadow:0 25px 80px rgba(0,0,0,.28); display:flex; flex-direction:column; align-items:center; gap:10px; text-align:center; }
+.auth-loading-logo { width:54px; height:54px; border-radius:16px; display:grid; place-items:center; background:#a66a37; color:#fff; font-size:27px; }
+.auth-loading-card strong { font-size:20px; } .auth-loading-card span { color:#6b7280; font-size:13px; }
+.auth-loading-bar { height:4px; width:100%; margin-top:8px; overflow:hidden; border-radius:99px; background:#eee7e1; }
+.auth-loading-bar i { display:block; height:100%; width:38%; border-radius:inherit; background:#a66a37; animation:authLoadingSlide 1.2s ease-in-out infinite alternate; }
+@keyframes authLoadingSlide { from { transform:translateX(0); } to { transform:translateX(165%); } }
+
 </style>
 </head>
 
-<body>
+<body class="auth-checking">
+
+    <div id="authLoading" class="auth-loading" role="status" aria-live="polite">
+        <div class="auth-loading-card">
+            <div class="auth-loading-logo">☕</div>
+            <strong>e-Kasir</strong>
+            <span>Memuat data...</span>
+            <div class="auth-loading-bar"><i></i></div>
+        </div>
+    </div>
 
     <div id="authScreen" class="auth-screen">
         <div class="auth-card">
@@ -3191,6 +3212,7 @@
         async function restoreSession() {
             firebaseInit();
             if (!firebaseReady) {
+                document.body.classList.remove('auth-checking');
                 document.getElementById('authScreen').style.display = 'grid';
                 showAuthMessage('Firebase belum dikonfigurasi. Isi FIREBASE_CONFIG di bagian atas kode.');
                 return
@@ -3198,6 +3220,7 @@
             fbAuth.onAuthStateChanged(async user => {
                 if (registrationInProgress) return;
                 if (!user) {
+                    document.body.classList.remove('auth-checking');
                     document.getElementById('authScreen').style.display = 'grid';
                     return
                 }
@@ -3207,6 +3230,8 @@
                     console.error(e);
                     document.getElementById('authScreen').style.display = 'grid';
                     showAuthMessage(e.message || 'Gagal memuat akun')
+                } finally {
+                    document.body.classList.remove('auth-checking');
                 }
             })
         }
