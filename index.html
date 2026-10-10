@@ -3955,7 +3955,10 @@ let pendingPurchaseBahanId = null;
         }
 
         function openMenuModal(id = null) {
-            let m = id ? db.menus.find(x => x.id === id) : {
+            // Menu baru harus selalu dimulai dengan resep kosong.
+            // Pencarian resep hanya dilakukan saat mengedit menu yang sudah ada.
+            const editing = id !== null && id !== undefined && String(id) !== '' && String(id) !== '0';
+            let m = editing ? db.menus.find(x => String(x.id) === String(id)) : {
                 name: '',
                 cat: 'Minuman',
                 price: '',
@@ -3963,13 +3966,37 @@ let pendingPurchaseBahanId = null;
                 emoji: '☕',
                 active: true
             };
-            // Ambil resep lama maupun resep baru. Beberapa resep lama tersimpan
-            // dengan menuId sebagai string atau dengan nama menu, dan item bahan
-            // lama bisa tersimpan sebagai [nama, qty].
-            const r = db.recipes.find(x =>
-                String(x.menuId ?? x.menuID ?? '') === String(id) ||
-                String(x.menuName ?? x.menu ?? '') === String(m.name)
-            );
+            if (!m) {
+                m = {
+                    name: '',
+                    cat: 'Minuman',
+                    price: '',
+                    hpp: 0,
+                    emoji: '☕',
+                    active: true
+                };
+            }
+
+            let r = null;
+            if (editing) {
+                // Utamakan ID menu agar resep menu lain tidak pernah ikut terbaca.
+                r = db.recipes.find(x =>
+                    String(x.menuId ?? x.menuID ?? x.menu_id ?? '') === String(id)
+                );
+
+                // Kompatibilitas data lama: cocokkan nama hanya jika resep lama
+                // belum memiliki ID menu yang valid.
+                if (!r && String(m.name || '').trim()) {
+                    const menuName = String(m.name).trim().toLowerCase();
+                    r = db.recipes.find(x => {
+                        const recipeId = x.menuId ?? x.menuID ?? x.menu_id;
+                        const hasValidId = recipeId !== undefined && recipeId !== null &&
+                            String(recipeId).trim() !== '' && String(recipeId) !== 'undefined';
+                        const legacyName = String(x.menuName ?? x.menu ?? '').trim().toLowerCase();
+                        return !hasValidId && legacyName === menuName;
+                    });
+                }
+            }
 
             const findBahanId = (item) => {
                 const rawId = item?.bahanId ?? item?.bahanID ?? item?.ingredientId;
@@ -3987,13 +4014,13 @@ let pendingPurchaseBahanId = null;
             const getQty = item => Array.isArray(item) ? (+item[1] || 0) :
                 (+((item?.qty ?? item?.jumlah ?? item?.quantity) || 0));
 
-            menuRecipeDraft = (r?.items || r?.recipe || r?.bahan || []).map(item => ({
+            menuRecipeDraft = editing ? (r?.items || r?.recipe || r?.bahan || []).map(item => ({
                 bahanId: findBahanId(item),
                 qty: getQty(item)
-            })).filter(item => item.bahanId || item.qty);
+            })).filter(item => item.bahanId || item.qty) : [];
             const selectedCat = m.cat || 'Minuman';
             const selectedEmoji = m.emoji || ({Minuman:'🥤',Makanan:'🍜',Snack:'🍟'}[selectedCat] || '🥤');
-            openModal(id ? 'Edit Menu' : 'Tambah Menu', `<div class=\"field\"><label>KATEGORI & IKON</label><div id=\"menuIconChoices\" style=\"display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px\"><button type=\"button\" class=\"menu-icon-choice ${selectedCat==='Minuman'?'active':''}\" data-cat=\"Minuman\" data-emoji=\"🥤\" onclick=\"selectMenuCategory('Minuman','🥤')\"><span style=\"font-size:34px;display:block;line-height:1.1\">🥤</span><b>Minuman</b></button><button type=\"button\" class=\"menu-icon-choice ${selectedCat==='Makanan'?'active':''}\" data-cat=\"Makanan\" data-emoji=\"🍜\" onclick=\"selectMenuCategory('Makanan','🍜')\"><span style=\"font-size:34px;display:block;line-height:1.1\">🍜</span><b>Makanan</b></button><button type=\"button\" class=\"menu-icon-choice ${selectedCat==='Snack'?'active':''}\" data-cat=\"Snack\" data-emoji=\"🍟\" onclick=\"selectMenuCategory('Snack','🍟')\"><span style=\"font-size:34px;display:block;line-height:1.1\">🍟</span><b>Snack</b></button></div><select id=\"fCat\" style=\"display:none\"><option ${selectedCat==='Minuman'?'selected':''}>Minuman</option><option ${selectedCat==='Makanan'?'selected':''}>Makanan</option><option ${selectedCat==='Snack'?'selected':''}>Snack</option></select><input type=\"hidden\" id=\"fEmoji\" value=\"${selectedEmoji}\"></div><div class=\"form-grid\" style=\"margin-top:12px\"><div class=\"field\"><label>NAMA MENU</label><input id=\"fName\" value=\"${m.name}\"></div><div class=\"field\"><label>HARGA JUAL</label><input id=\"fPrice\" type=\"number\" value=\"${m.price}\" oninput=\"renderRecipeRows()\"></div><div class=\"field\"><label>HPP / PORSI</label><input id=\"fHpp\" type=\"number\" value=\"${m.hpp||0}\" readonly></div><div class=\"field\"><label>FOOD COST</label><input id=\"foodCostPreview\" value=\"-\" readonly></div></div><div style=\"margin-top:15px\"><div class=\"section-title\"><h3 style=\"margin:0\">Resep</h3><button class=\"btn\" onclick=\"addRecipeRow()\">+ Tambah Bahan</button></div><div id=\"recipeRows\"></div></div><button class=\"btn primary\" style=\"margin-top:15px\" onclick=\"saveMenu(${id||0})\">Simpan</button>`);
+            openModal(editing ? 'Edit Menu' : 'Tambah Menu', `<div class=\"field\"><label>KATEGORI & IKON</label><div id=\"menuIconChoices\" style=\"display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px\"><button type=\"button\" class=\"menu-icon-choice ${selectedCat==='Minuman'?'active':''}\" data-cat=\"Minuman\" data-emoji=\"🥤\" onclick=\"selectMenuCategory('Minuman','🥤')\"><span style=\"font-size:34px;display:block;line-height:1.1\">🥤</span><b>Minuman</b></button><button type=\"button\" class=\"menu-icon-choice ${selectedCat==='Makanan'?'active':''}\" data-cat=\"Makanan\" data-emoji=\"🍜\" onclick=\"selectMenuCategory('Makanan','🍜')\"><span style=\"font-size:34px;display:block;line-height:1.1\">🍜</span><b>Makanan</b></button><button type=\"button\" class=\"menu-icon-choice ${selectedCat==='Snack'?'active':''}\" data-cat=\"Snack\" data-emoji=\"🍟\" onclick=\"selectMenuCategory('Snack','🍟')\"><span style=\"font-size:34px;display:block;line-height:1.1\">🍟</span><b>Snack</b></button></div><select id=\"fCat\" style=\"display:none\"><option ${selectedCat==='Minuman'?'selected':''}>Minuman</option><option ${selectedCat==='Makanan'?'selected':''}>Makanan</option><option ${selectedCat==='Snack'?'selected':''}>Snack</option></select><input type=\"hidden\" id=\"fEmoji\" value=\"${selectedEmoji}\"></div><div class=\"form-grid\" style=\"margin-top:12px\"><div class=\"field\"><label>NAMA MENU</label><input id=\"fName\" value=\"${m.name}\"></div><div class=\"field\"><label>HARGA JUAL</label><input id=\"fPrice\" type=\"number\" value=\"${m.price}\" oninput=\"renderRecipeRows()\"></div><div class=\"field\"><label>HPP / PORSI</label><input id=\"fHpp\" type=\"number\" value=\"${m.hpp||0}\" readonly></div><div class=\"field\"><label>FOOD COST</label><input id=\"foodCostPreview\" value=\"-\" readonly></div></div><div style=\"margin-top:15px\"><div class=\"section-title\"><h3 style=\"margin:0\">Resep</h3><button class=\"btn\" onclick=\"addRecipeRow()\">+ Tambah Bahan</button></div><div id=\"recipeRows\"></div></div><button class=\"btn primary\" style=\"margin-top:15px\" onclick=\"saveMenu(${id||0})\">Simpan</button>`);
             const iconStyle = document.createElement('style');
             iconStyle.id = 'menuIconChoiceStyle';
             iconStyle.textContent = `.menu-icon-choice{border:1px solid var(--border,#dbe3ef);background:#fff;border-radius:12px;padding:12px 8px;cursor:pointer;text-align:center;color:var(--text,#1f2937);transition:.15s;min-height:88px}.menu-icon-choice:hover{border-color:#2563eb;background:#f8fbff}.menu-icon-choice.active{border:2px solid #2563eb;background:#eff6ff;box-shadow:0 0 0 2px rgba(37,99,235,.08)}.menu-icon-choice b{display:block;margin-top:6px}`;
