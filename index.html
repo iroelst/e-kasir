@@ -2291,7 +2291,8 @@
 body.auth-checking .auth-loading { display:grid; }
 body.auth-checking .auth-screen, body.auth-checking .app, body.auth-checking #platformOwnerScreen { display:none !important; }
 .auth-loading-card { width:min(320px,100%); padding:28px 24px; border-radius:22px; background:#fff; box-shadow:0 25px 80px rgba(0,0,0,.28); display:flex; flex-direction:column; align-items:center; gap:10px; text-align:center; }
-.auth-loading-logo { width:54px; height:54px; border-radius:16px; display:grid; place-items:center; background:#a66a37; color:#fff; font-size:27px; }
+.auth-loading-logo { width:64px; height:64px; border-radius:16px; display:grid; place-items:center; background:#fff; overflow:hidden; }
+.auth-loading-logo img { width:100%; height:100%; object-fit:contain; display:block; border-radius:inherit; }
 .auth-loading-card strong { font-size:20px; } .auth-loading-card span { color:#6b7280; font-size:13px; }
 .auth-loading-bar { height:4px; width:100%; margin-top:8px; overflow:hidden; border-radius:99px; background:#eee7e1; }
 .auth-loading-bar i { display:block; height:100%; width:38%; border-radius:inherit; background:#a66a37; animation:authLoadingSlide 1.2s ease-in-out infinite alternate; }
@@ -2304,7 +2305,7 @@ body.auth-checking .auth-screen, body.auth-checking .app, body.auth-checking #pl
 
     <div id="authLoading" class="auth-loading" role="status" aria-live="polite">
         <div class="auth-loading-card">
-            <div class="auth-loading-logo">☕</div>
+            <div class="auth-loading-logo"><img src="./icon-192.png" alt="Logo e-Kasir"></div>
             <strong>e-Kasir</strong>
             <span>Memuat data...</span>
             <div class="auth-loading-bar"><i></i></div>
