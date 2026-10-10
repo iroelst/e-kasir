@@ -1,4 +1,7 @@
-const CACHE_NAME = 'e-kasir-pwa-v2';
+
+const CACHE_NAME = 'e-kasir-pwa-v3';
+const CACHE_PREFIX = 'e-kasir-pwa-';
+
 const APP_SHELL = [
   './',
   './index.html',
@@ -19,7 +22,14 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+      Promise.all(
+        keys
+          .filter(key =>
+            key.startsWith(CACHE_PREFIX) &&
+            key !== CACHE_NAME
+          )
+          .map(key => caches.delete(key))
+      )
     ).then(() => self.clients.claim())
   );
 });
@@ -27,29 +37,54 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
 
+  const requestURL = new URL(event.request.url);
+
+  if (requestURL.origin !== self.location.origin) return;
+
+  const appPath = new URL('./', self.registration.scope).pathname;
+
+  if (!requestURL.pathname.startsWith(appPath)) return;
+
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request)
         .then(response => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
+          if (response && response.ok) {
+            const copy = response.clone();
+
+            caches.open(CACHE_NAME)
+              .then(cache => cache.put(event.request, copy));
+          }
+
           return response;
         })
-        .catch(() => caches.match(event.request).then(c => c || caches.match('./index.html')))
+        .catch(async () => {
+          const cache = await caches.open(CACHE_NAME);
+
+          return (
+            await cache.match(event.request)
+          ) || (
+            await cache.match('./index.html')
+          );
+        })
     );
+
     return;
   }
 
-  const url = new URL(event.request.url);
-  if (url.origin === self.location.origin) {
-    event.respondWith(
-      caches.match(event.request).then(cached =>
-        cached || fetch(event.request).then(response => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
-          return response;
-        })
-      )
-    );
-  }
+  event.respondWith(
+    caches.open(CACHE_NAME).then(async cache => {
+      const cached = await cache.match(event.request);
+
+      if (cached) return cached;
+
+      const response = await fetch(event.request);
+
+      if (response && response.ok) {
+        cache.put(event.request, response.clone());
+      }
+
+      return response;
+    })
+  );
 });
