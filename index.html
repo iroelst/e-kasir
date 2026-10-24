@@ -2299,6 +2299,13 @@ body.auth-checking .auth-screen, body.auth-checking .app, body.auth-checking #pl
 @keyframes authLoadingSlide { from { transform:translateX(0); } to { transform:translateX(165%); } }
 
 
+
+/* Dashboard akun Kasir: sembunyikan kartu HPP dan Laba Kotor saja. */
+body.role-kasir #dashboard .cards > .card.metric:has(#mHpp),
+body.role-kasir #dashboard .cards > .card.metric:has(#mLaba) {
+    display: none !important;
+}
+
 /* Tampilan khusus akun Kasir: laporan hanya omzet dan riwayat transaksi. */
 body.role-kasir #laporan .report-actions { display: none !important; }
 body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none !important; }
