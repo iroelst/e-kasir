@@ -2350,6 +2350,26 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
     }
 }
 
+
+
+/* Kartu Keuangan responsif: 3 kolom di monitor lebar, 2 di tablet, 1 di HP kecil */
+#keuangan .cash-finance-cards {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: clamp(10px, 1.4vw, 18px);
+    width: 100%;
+}
+#keuangan .cash-finance-cards > .card { min-width: 0; }
+#keuangan .cash-finance-cards .metric > div:first-child { min-width: 0; }
+#keuangan .cash-finance-cards .metric strong { overflow-wrap: anywhere; }
+#keuangan .cash-finance-cards .trend { overflow-wrap: anywhere; line-height: 1.45; }
+@media (max-width: 900px) {
+    #keuangan .cash-finance-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+    #keuangan .cash-finance-cards { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+    #keuangan .cash-finance-cards > .card { padding: 14px; }
+}
 </style>
 </head>
 
