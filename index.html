@@ -4570,7 +4570,7 @@ let pendingPurchaseBahanId = null;
                 return
             }
             w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>
- body{font-family:Arial,sans-serif;color:#111;margin:25px;font-size:12px}table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid #999;padding:6px;text-align:left}th{background:#f2f2f2}.num{text-align:right}.summary{margin-top:16px;display:flex;justify-content:flex-end}.summary table{width:360px}@media print{@page{size:A4;margin:10mm}body{margin:0}}
+ body{font-family:Arial,sans-serif;color:#111;margin:25px;font-size:12px}table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid #999;padding:6px;text-align:left}th{background:#f2f2f2}.num{text-align:right}.summary-cards th,.summary-cards td{width:33%;vertical-align:top}.summary-cards small{font-size:10px;font-weight:normal}.summary{margin-top:16px;display:flex;justify-content:flex-end}.summary table{width:360px}@media print{@page{size:A4;margin:10mm}body{margin:0}}
  </style></head><body>${body}
 </body></html>`);
             w.document.close();
@@ -4948,12 +4948,22 @@ let pendingPurchaseBahanId = null;
 
         function printCashFlow() {
             if (!isAdminClient()) return toast('Hanya Admin yang dapat mencetak arus kas.');
-            const page = document.getElementById('keuangan');
-            if (!page) return;
             renderCashFinance();
-            page.classList.add('print-target');
-            window.print();
-            setTimeout(() => page.classList.remove('print-target'), 700);
+            const from = document.getElementById('cashReportFrom')?.value || periodKey() + '-01';
+            const to = document.getElementById('cashReportTo')?.value || new Date().toISOString().slice(0, 10);
+            const tbody = document.getElementById('cashFlowTable');
+            const rows = tbody ? tbody.innerHTML : '';
+            const totalIn = document.getElementById('cashTotalIn')?.textContent || rupiah(0);
+            const totalInDetails = document.getElementById('cashTotalInDetails')?.textContent || '';
+            const totalOut = document.getElementById('cashTotalOut')?.textContent || rupiah(0);
+            const totalOutDetails = document.getElementById('cashTotalOutDetails')?.textContent || '';
+            const balance = document.getElementById('cashBalance')?.textContent || '';
+            const body = reportHeader('LAPORAN ARUS KAS', from, to) + `
+                <table class="summary-cards"><thead><tr><th>Saldo Kas Tunai</th><th>Total Uang Masuk</th><th>Total Uang Keluar</th></tr></thead>
+                <tbody><tr><td><b>${balance || '-'}</b></td><td><b>${totalIn}</b><br><small>${totalInDetails}</small></td><td><b>${totalOut}</b><br><small>${totalOutDetails}</small></td></tr></tbody></table>
+                <h3>Rincian Arus Kas</h3><table><thead><tr><th>Tanggal</th><th>Jenis</th><th>Keterangan</th><th>Uang Masuk</th><th>Uang Keluar</th></tr></thead><tbody>${rows || '<tr><td colspan="5">Tidak ada transaksi pada periode ini.</td></tr>'}</tbody></table>
+                <p style="margin-top:18px;font-size:10px">Dicetak pada ${new Date().toLocaleString('id-ID')}</p>`;
+            openPrintWindow('Laporan Arus Kas', body);
         }
 
         function renderAll() {
