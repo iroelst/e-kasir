@@ -4875,8 +4875,8 @@ let pendingPurchaseBahanId = null;
         async function createKasirUser(ev) {
             ev.preventDefault();
             if (!isAdminClient()) return toast('Hanya Admin yang dapat menambahkan Kasir.');
-            if (!firebaseReady || !window.fbFs) {
-                toast('Firebase belum siap. Muat ulang halaman dan login kembali.');
+            if (!firebaseReady || !window.fbFs || !currentUser || !SHOP_ID) {
+                showKasirCreateError('Sesi Admin atau koneksi Firebase belum siap. Muat ulang halaman dan login kembali.');
                 return false;
             }
             const nameEl = document.getElementById('kasirName');
@@ -4892,19 +4892,63 @@ let pendingPurchaseBahanId = null;
             const email = emailEl.value.trim().toLowerCase();
             const password = passEl.value;
             const password2 = pass2El.value;
-            if (password !== password2) { toast('Konfirmasi password tidak sama.'); return false; }
-            if (password.length < 6) { toast('Password minimal 6 karakter.'); return false; }
+            if (!name) { showKasirCreateError('Nama Kasir wajib diisi.'); return false; }
+            if (password !== password2) { showKasirCreateError('Konfirmasi password tidak sama.'); return false; }
+            if (password.length < 6) { showKasirCreateError('Password minimal 6 karakter.'); return false; }
+
             btn.disabled = true;
-            btn.textContent = 'Membuat akun...';
+            btn.textContent = 'Memproses akun...';
+            clearKasirCreateError();
+            let secondaryUser = null;
             try {
-                // Gunakan Firebase App kedua agar Admin tetap login saat membuat akun baru.
+                // App Auth kedua menjaga sesi Admin tetap aktif.
                 if (!firebaseAdminApp) firebaseAdminApp = firebase.initializeApp(FIREBASE_CONFIG, 'kasirCreator');
                 firebaseAdminAuth = firebaseAdminApp.auth();
-                const cred = await firebaseAdminAuth.createUserWithEmailAndPassword(email, password);
-                await fbFs.doc('users/' + cred.user.uid).set({
-                    uid: cred.user.uid,
-                    name,
-                    email,
+                let uid = '';
+                let accountWasAlreadyPresent = false;
+
+                try {
+                    const cred = await firebaseAdminAuth.createUserWithEmailAndPassword(email, password);
+                    secondaryUser = cred.user;
+                    uid = cred.user.uid;
+                } catch (createError) {
+                    if (createError?.code !== 'auth/email-already-in-use') throw createError;
+
+                    // Pemulihan akun Auth yang sudah ada tetapi mungkin belum memiliki profil.
+                    // Password harus cocok dengan akun tersebut; tidak ada pengambilan alih akun hanya berdasarkan email.
+                    accountWasAlreadyPresent = true;
+                    try {
+                        const cred = await firebaseAdminAuth.signInWithEmailAndPassword(email, password);
+                        secondaryUser = cred.user;
+                        uid = cred.user.uid;
+                    } catch (signInError) {
+                        if (signInError?.code === 'auth/invalid-credential' || signInError?.code === 'auth/wrong-password' || signInError?.code === 'auth/user-not-found') {
+                            throw new Error('Email sudah ada di Authentication, tetapi password yang dimasukkan tidak cocok dengan akun tersebut. Gunakan password akun yang sudah ada atau pulihkan password akun itu terlebih dahulu.');
+                        }
+                        throw signInError;
+                    }
+                }
+
+                if (!uid) throw new Error('Firebase tidak mengembalikan UID akun.');
+                const userRef = window.fbFs.doc('users/' + uid);
+                const existing = await userRef.get();
+                if (existing.exists) {
+                    const old = existing.data() || {};
+                    // Jangan menimpa akun yang sudah terhubung ke toko/role lain.
+                    if (String(old.shopId || '') !== String(SHOP_ID) || String(old.role || '').toLowerCase() !== 'kasir') {
+                        throw new Error('Akun Authentication ini sudah memiliki profil Firestore dengan toko atau role berbeda. Profil tidak diubah demi keamanan.');
+                    }
+                    // Profil kasir yang benar sudah ada: jangan timpa status atau data lain.
+                    closeModal();
+                    await renderKasirUsers();
+                    toast('Akun Kasir ini sudah terhubung dengan toko Anda.');
+                    return false;
+                }
+
+                await userRef.set({
+                    uid: uid,
+                    name: name,
+                    email: email,
                     role: 'kasir',
                     shopId: SHOP_ID,
                     shopName: db.settings?.name || 'Warung',
@@ -4913,43 +4957,51 @@ let pendingPurchaseBahanId = null;
                     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                     createdBy: currentUser.uid
                 });
-                try { await firebaseAdminAuth.signOut(); } catch (e) {}
+
                 closeModal();
                 await renderKasirUsers();
-                toast('User Kasir berhasil dibuat.');
+                toast(accountWasAlreadyPresent
+                    ? 'Profil Firestore berhasil dipulihkan. Kasir sekarang dapat mencoba login.'
+                    : 'User Kasir berhasil dibuat.');
             } catch (e) {
                 console.error('createKasirUser error:', e, e?.code, e?.message);
-                const code = e?.code || 'unknown';
-                let msg = e?.code === 'auth/email-already-in-use'
-                    ? 'Email sudah terdaftar di Firebase Authentication.'
-                    : e?.code === 'auth/operation-not-allowed'
-                      ? 'Metode Email/Password belum diaktifkan di Firebase Authentication.'
-                      : e?.code === 'auth/weak-password'
-                        ? 'Password terlalu lemah. Gunakan minimal 6 karakter.'
-                        : e?.code === 'auth/invalid-email'
-                          ? 'Format email tidak valid.'
-                          : e?.code === 'auth/network-request-failed'
-                            ? 'Jaringan gagal menghubungi Firebase. Periksa internet lalu coba lagi.'
-                            : e?.code === 'auth/unauthorized-domain'
-                              ? 'Domain aplikasi belum diizinkan. Tambahkan domain GitHub Pages di Firebase Authentication → Settings → Authorized domains.'
-                              : e?.code === 'permission-denied'
-                                ? 'Akun Auth mungkin sudah dibuat, tetapi Firestore menolak profil Kasir. Periksa Firestore Rules.'
-                                : (e?.message || 'Gagal membuat akun Kasir.');
-                const modalForm = document.getElementById('addKasirForm');
-                if (modalForm) {
-                    let errorBox = document.getElementById('kasirCreateError');
-                    if (!errorBox) {
-                        errorBox = document.createElement('div');
-                        errorBox.id = 'kasirCreateError';
-                        errorBox.style.cssText = 'margin-top:12px;padding:12px;border:1px solid #dc2626;border-radius:10px;background:#fef2f2;color:#991b1b;white-space:normal;font-size:14px;line-height:1.45;';
-                        modalForm.appendChild(errorBox);
-                    }
-                    errorBox.textContent = 'Gagal (' + code + '): ' + msg;
-                }
-                toast('Gagal membuat Kasir (' + code + '). Lihat pesan merah di formulir.');
+                const code = e?.code || 'error';
+                let msg = e?.message || 'Gagal membuat atau memulihkan profil Kasir.';
+                if (e?.code === 'auth/operation-not-allowed') msg = 'Metode Email/Password belum diaktifkan di Firebase Authentication.';
+                else if (e?.code === 'auth/weak-password') msg = 'Password terlalu lemah. Gunakan minimal 6 karakter.';
+                else if (e?.code === 'auth/invalid-email') msg = 'Format email tidak valid.';
+                else if (e?.code === 'auth/network-request-failed') msg = 'Jaringan gagal menghubungi Firebase. Periksa internet lalu coba lagi.';
+                else if (e?.code === 'auth/unauthorized-domain') msg = 'Domain aplikasi belum diizinkan di Firebase Authentication → Settings → Authorized domains.';
+                else if (e?.code === 'permission-denied' || e?.code === 'firestore/permission-denied') msg = 'Firestore menolak pembuatan profil. Pastikan Rules mengizinkan Admin membuat dokumen users dengan shopId toko Admin dan createdBy UID Admin.';
+                showKasirCreateError('Gagal (' + code + '): ' + msg);
+                toast('Gagal memproses akun Kasir. Lihat pesan merah di formulir.');
             } finally {
-                if (btn) { btn.disabled = false; btn.textContent = 'Buat Akun Kasir'; }
+                if (firebaseAdminAuth) {
+                    try { await firebaseAdminAuth.signOut(); } catch (_) {}
+                }
+                if (btn && document.body.contains(btn)) {
+                    btn.disabled = false;
+                    btn.textContent = 'Buat Akun Kasir';
+                }
             }
+            return false;
+        }
+
+        function showKasirCreateError(message) {
+            const form = document.getElementById('addKasirForm');
+            if (!form) { toast(message); return; }
+            let box = document.getElementById('kasirCreateError');
+            if (!box) {
+                box = document.createElement('div');
+                box.id = 'kasirCreateError';
+                box.style.cssText = 'margin-top:12px;padding:12px;border:1px solid #dc2626;border-radius:10px;background:#fef2f2;color:#991b1b;white-space:normal;font-size:14px;line-height:1.45;';
+                form.appendChild(box);
+            }
+            box.textContent = message;
+        }
+
+        function clearKasirCreateError() {
+            document.getElementById('kasirCreateError')?.remove();
         }
 
         // Pastikan handler form tetap dapat dipanggil dari HTML modal yang dibuat dinamis.
