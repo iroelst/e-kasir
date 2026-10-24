@@ -4897,10 +4897,35 @@ let pendingPurchaseBahanId = null;
             if (password.length < 6) { showKasirCreateError('Password minimal 6 karakter.'); return false; }
 
             btn.disabled = true;
-            btn.textContent = 'Memproses akun...';
+            btn.textContent = 'Memeriksa profil Admin...';
             clearKasirCreateError();
             let secondaryUser = null;
+            let adminProfileForKasir = null;
             try {
+                // Periksa profil Admin terlebih dahulu agar tidak membuat akun Auth
+                // baru yang kemudian tertinggal tanpa profil Firestore.
+                const adminProfileSnap = await window.fbFs.doc('users/' + currentUser.uid).get();
+                if (!adminProfileSnap.exists) {
+                    throw new Error('Profil Admin tidak ditemukan pada users/' + currentUser.uid + '. Proses dihentikan sebelum membuat akun Authentication.');
+                }
+                adminProfileForKasir = adminProfileSnap.data() || {};
+                const adminRole = String(adminProfileForKasir.role || '').toLowerCase();
+                const adminShopId = String(adminProfileForKasir.shopId || '');
+                if (adminRole !== 'admin' && currentUser.uid !== PLATFORM_OWNER_UID && currentUser.uid !== LEGACY_TEST_UID) {
+                    throw new Error('Role profil Anda bukan admin (terbaca: ' + (adminRole || 'kosong') + '). Akun Kasir tidak dibuat.');
+                }
+                if (currentUser.uid !== PLATFORM_OWNER_UID && currentUser.uid !== LEGACY_TEST_UID) {
+                    if (adminProfileForKasir.approved !== true) {
+                        throw new Error('Profil Admin belum memiliki approved: true. Akun Kasir tidak dibuat.');
+                    }
+                    if (adminProfileForKasir.disabled === true) {
+                        throw new Error('Profil Admin sedang disabled. Akun Kasir tidak dibuat.');
+                    }
+                    if (!adminShopId || adminShopId !== String(SHOP_ID)) {
+                        throw new Error('shopId sesi aplikasi tidak cocok dengan profil Admin. Profil=' + (adminShopId || '(kosong)') + '; sesi=' + String(SHOP_ID || '(kosong)') + '. Muat ulang halaman dan login kembali.');
+                    }
+                }
+                btn.textContent = 'Memproses akun...';
                 // App Auth kedua menjaga sesi Admin tetap aktif.
                 if (!firebaseAdminApp) firebaseAdminApp = firebase.initializeApp(FIREBASE_CONFIG, 'kasirCreator');
                 firebaseAdminAuth = firebaseAdminApp.auth();
@@ -4945,13 +4970,17 @@ let pendingPurchaseBahanId = null;
                     return false;
                 }
 
+                const targetShopId = (currentUser.uid === PLATFORM_OWNER_UID || currentUser.uid === LEGACY_TEST_UID)
+                    ? String(SHOP_ID)
+                    : String(adminProfileForKasir?.shopId || SHOP_ID);
+                const targetShopName = String(adminProfileForKasir?.shopName || db.settings?.name || 'Warung');
                 await userRef.set({
                     uid: uid,
                     name: name,
                     email: email,
                     role: 'kasir',
-                    shopId: SHOP_ID,
-                    shopName: db.settings?.name || 'Warung',
+                    shopId: targetShopId,
+                    shopName: targetShopName,
                     approved: true,
                     disabled: false,
                     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -4972,7 +5001,16 @@ let pendingPurchaseBahanId = null;
                 else if (e?.code === 'auth/invalid-email') msg = 'Format email tidak valid.';
                 else if (e?.code === 'auth/network-request-failed') msg = 'Jaringan gagal menghubungi Firebase. Periksa internet lalu coba lagi.';
                 else if (e?.code === 'auth/unauthorized-domain') msg = 'Domain aplikasi belum diizinkan di Firebase Authentication → Settings → Authorized domains.';
-                else if (e?.code === 'permission-denied' || e?.code === 'firestore/permission-denied') msg = 'Firestore menolak pembuatan profil. Pastikan Rules mengizinkan Admin membuat dokumen users dengan shopId toko Admin dan createdBy UID Admin.';
+                else if (e?.code === 'permission-denied' || e?.code === 'firestore/permission-denied') {
+                    msg = 'Firestore menolak penulisan profil Kasir. Data yang dikirim: UID Admin=' + String(currentUser?.uid || '(kosong)') +
+                        '; role Admin=' + String(adminProfileForKasir?.role || '(kosong)') +
+                        '; approved=' + String(adminProfileForKasir?.approved) +
+                        '; disabled=' + String(adminProfileForKasir?.disabled) +
+                        '; shopId Admin=' + String(adminProfileForKasir?.shopId || '(kosong)') +
+                        '; shopId aplikasi=' + String(SHOP_ID || '(kosong)') +
+                        '; createdBy=' + String(currentUser?.uid || '(kosong)') +
+                        '. Jika semua nilai benar, periksa apakah Rules terbaru sudah dipublikasikan di project Firebase yang sama dengan aplikasi.';
+                }
                 showKasirCreateError('Gagal (' + code + '): ' + msg);
                 toast('Gagal memproses akun Kasir. Lihat pesan merah di formulir.');
             } finally {
