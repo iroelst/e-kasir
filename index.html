@@ -2710,7 +2710,7 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
                         <div class="field"><label>SAMPAI TANGGAL</label><input id="cashReportTo" type="date" onchange="renderCashFinance()"></div>
                     </div>
                     <div id="cashFlowSummary" class="cards" style="margin-bottom:14px"></div>
-                    <div style="overflow:auto"><table class="table"><thead><tr><th>Tanggal</th><th>Jenis</th><th>Keterangan</th><th>Uang Masuk</th><th>Uang Keluar</th></tr></thead><tbody id="cashFlowTable"></tbody></table></div>
+                    <div style="overflow:auto"><table class="table"><thead><tr><th>Tanggal</th><th>Nama Kasir</th><th>Jenis</th><th>Keterangan</th><th>Uang Masuk</th><th>Uang Keluar</th></tr></thead><tbody id="cashFlowTable"></tbody></table></div>
                     <div class="cash-flow-note" style="margin-top:12px;color:var(--muted);font-size:12px">Catatan: saldo kas tunai dihitung berdasarkan data yang terlihat untuk akun yang sedang login. Pembelian dan pengeluaran dianggap tunai dan mengurangi saldo kas.</div>
                 </div>
             </section>
@@ -3115,7 +3115,7 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
         // Hak akses menu berdasarkan role. Kasir dapat membuka Dashboard, Kasir, Pembelian, dan Laporan terbatas.
         function applyRoleAccess() {
             const kasir = isKasirClient();
-            const allowedKasirPages = ['dashboard', 'kasir', 'pembelian', 'laporan', 'keuangan'];
+            const allowedKasirPages = ['dashboard', 'kasir', 'pembelian', 'pengeluaran', 'laporan', 'keuangan'];
             const openingTitle = document.getElementById('cashOpeningTitle');
             const openingHelp = document.getElementById('cashOpeningHelp');
             const entryTitle = document.getElementById('cashEntryTitle');
@@ -3146,7 +3146,7 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
 
         function canAccessPage(page) {
             if (isAdminClient()) return true;
-            if (isKasirClient()) return ['dashboard', 'kasir', 'pembelian', 'laporan', 'keuangan'].includes(page);
+            if (isKasirClient()) return ['dashboard', 'kasir', 'pembelian', 'pengeluaran', 'laporan', 'keuangan'].includes(page);
             return false;
         }
 
@@ -4068,7 +4068,11 @@ let pendingPurchaseBahanId = null;
         }
 
         function renderExpenses() {
-            expenseTable.innerHTML = db.expenses.filter(e => recordBelongsToCurrentUser(e, 'expense')).slice().reverse().map(e => `<tr><td>${formatDateID(e.date)}</td><td>${e.cat}</td><td>${e.note}</td><td><b>${rupiah(e.amount)}</b></td><td><div style="display:flex;gap:6px"><button class="btn" title="Edit pengeluaran" onclick="openExpenseModal(${e.id})">✏️ Edit</button><button class="btn" title="Hapus pengeluaran" onclick="deleteExpense(${e.id})">🗑️ Hapus</button></div></td></tr>`).join('') || '<tr><td colspan="5"><div class="empty">Belum ada pengeluaran.</div></td></tr>'
+            const ownExpenses = db.expenses.filter(e => recordBelongsToCurrentUser(e, 'expense'));
+            expenseTable.innerHTML = ownExpenses.slice().reverse().map(e => {
+                const canManage = isAdminClient() || (isKasirClient() && String(e.createdByUid || e.cashierUid || '') === String(currentUser?.uid || ''));
+                return `<tr><td>${formatDateID(e.date)}</td><td>${escapeHtml(e.cat || '')}</td><td>${escapeHtml(e.note || '')}</td><td><b>${rupiah(e.amount)}</b></td><td><div style="display:flex;gap:6px">${canManage ? `<button class="btn" title="Edit pengeluaran" onclick="openExpenseModal(${e.id})">✏️ Edit</button><button class="btn" title="Hapus pengeluaran" onclick="deleteExpense(${e.id})">🗑️ Hapus</button>` : '—'}</div></td></tr>`;
+            }).join('') || '<tr><td colspan="5"><div class="empty">Belum ada pengeluaran.</div></td></tr>';
         }
 
         function getReportRange() {
@@ -4418,13 +4422,15 @@ let pendingPurchaseBahanId = null;
         }
 
         function openExpenseModal(editId = null) {
-            if (editId && !isAdminClient()) return toast('Hanya Admin yang dapat mengedit pengeluaran.');
+            if (!isAdminClient() && !isKasirClient()) return toast('Akses menu pengeluaran tidak diizinkan.');
             const editing = editId ? db.expenses.find(x => x.id === editId) : null;
             if (editId && !editing) return toast('Data pengeluaran tidak ditemukan.');
-            openModal(editing ? 'Edit Pengeluaran' : 'Catat Pengeluaran', `<div class="form-grid"><div class="field"><label>TANGGAL</label><input id="eDate" type="date" value="${editing?.date || today()}"></div><div class="field"><label>KATEGORI</label><input id="eCat" value="${editing?.cat || 'Operasional'}"></div><div class="field"><label>JUMLAH</label><input id="eAmount" type="number" min="0" value="${editing?.amount ?? ''}"></div><div class="field full"><label>KETERANGAN</label><input id="eNote" value="${editing?.note || ''}" placeholder="Contoh: beli gas"></div></div><button class="btn primary" style="margin-top:15px" onclick="saveExpense(${editId || 0})">${editing ? 'Simpan Perubahan' : 'Simpan'}</button>`)
+            if (editing && !recordBelongsToCurrentUser(editing, 'expense')) return toast('Anda hanya dapat mengubah pengeluaran milik akun sendiri.');
+            openModal(editing ? 'Edit Pengeluaran' : 'Catat Pengeluaran', `<div class="form-grid"><div class="field"><label>TANGGAL</label><input id="eDate" type="date" value="${editing?.date || today()}"></div><div class="field"><label>KATEGORI</label><input id="eCat" value="${escapeHtml(editing?.cat || 'Operasional')}"></div><div class="field"><label>JUMLAH</label><input id="eAmount" type="number" min="0" value="${editing?.amount ?? ''}"></div><div class="field full"><label>KETERANGAN</label><input id="eNote" value="${escapeHtml(editing?.note || '')}" placeholder="Contoh: beli gas"></div></div><button class="btn primary" style="margin-top:15px" onclick="saveExpense(${editId || 0})">${editing ? 'Simpan Perubahan' : 'Simpan'}</button>`)
         }
 
         function saveExpense(editId = 0) {
+            if (!isAdminClient() && !isKasirClient()) return toast('Akses mencatat pengeluaran tidak diizinkan.');
             const date = document.getElementById('eDate')?.value || today();
             const cat = (document.getElementById('eCat')?.value || '').trim();
             const note = (document.getElementById('eNote')?.value || '').trim();
@@ -4434,7 +4440,10 @@ let pendingPurchaseBahanId = null;
             if (amount <= 0) return toast('Masukkan jumlah');
             const existing = editId ? db.expenses.find(x => x.id === editId) : null;
             if (editId && !existing) return toast('Data pengeluaran tidak ditemukan.');
-            const item = { id: editId || db.nextId++, date, cat, note, amount, createdByUid: existing?.createdByUid || existing?.cashierUid || currentUser?.uid || '', createdByName: existing?.createdByName || existing?.cashierName || currentUserName || 'User' };
+            if (existing && !recordBelongsToCurrentUser(existing, 'expense')) return toast('Anda hanya dapat mengubah pengeluaran milik akun sendiri.');
+            const item = { id: editId || db.nextId++, date, cat, note, amount,
+                createdByUid: existing?.createdByUid || existing?.cashierUid || currentUser?.uid || '',
+                createdByName: existing?.createdByName || existing?.cashierName || currentUserName || currentUser?.displayName || 'User' };
             if (editId) db.expenses = db.expenses.map(x => x.id === editId ? item : x);
             else db.expenses.push(item);
             save();
@@ -4444,9 +4453,10 @@ let pendingPurchaseBahanId = null;
         }
 
         function deleteExpense(id) {
-            if (!isAdminClient()) return toast('Hanya Admin yang dapat menghapus pengeluaran.');
+            if (!isAdminClient() && !isKasirClient()) return toast('Akses menghapus pengeluaran tidak diizinkan.');
             const e = db.expenses.find(x => x.id === id);
             if (!e) return toast('Data pengeluaran tidak ditemukan.');
+            if (!recordBelongsToCurrentUser(e, 'expense')) return toast('Anda hanya dapat menghapus pengeluaran milik akun sendiri.');
             if (confirm(`Hapus pengeluaran ${rupiah(e.amount)} — ${e.note || e.cat}? Data ini juga akan hilang dari laporan terkait.`)) {
                 db.expenses = db.expenses.filter(x => x.id !== id);
                 save();
@@ -4584,9 +4594,9 @@ let pendingPurchaseBahanId = null;
         function exportCSV() {
             const r = getReportRange();
             const rows = [
-                ['Tanggal', 'Waktu', 'Item', 'Pembayaran', 'Omzet', 'HPP', 'Laba'],
+                ['Tanggal', 'Waktu', 'Nama Kasir', 'Item', 'Pembayaran', 'Omzet', 'HPP', 'Laba'],
                 ...rangeTransactions(r.from, r.to).map(t => [
-                    formatDateID(t.date), t.time, t.items.map(i => i.name + ' x' + i.qty).join(' | '), t.pay, t.total, t.hpp, t.total - t.hpp
+                    formatDateID(t.date), t.time, t.cashierName || t.createdByName || 'Kasir', t.items.map(i => i.name + ' x' + i.qty).join(' | '), t.pay, t.total, t.hpp, t.total - t.hpp
                 ])
             ];
             const csv = rows.map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(',')).join('\\n');
@@ -4631,9 +4641,9 @@ let pendingPurchaseBahanId = null;
                 laba = omzet - hpp,
                 keluar = ex.reduce((a, e) => a + e.amount, 0),
                 net = laba - keluar;
-            const rows = tx.map(t => `<tr><td>${formatDateID(t.date)}</td><td>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</td><td class="num">${rupiah(t.total)}</td><td class="num">${rupiah(t.hpp)}</td><td class="num">${rupiah(t.total-t.hpp)}</td></tr>`).join('');
-            const exRows = ex.map(e => `<tr><td>${formatDateID(e.date)}</td><td>${e.cat}</td><td>${e.note||'-'}</td><td class="num">${rupiah(e.amount)}</td></tr>`).join('');
-            const body = reportHeader('LAPORAN LABA RUGI', r.from, r.to) + `<h3>Pendapatan & HPP</h3><table><thead><tr><th>Tanggal</th><th>Transaksi</th><th>Omzet</th><th>HPP</th><th>Laba Kotor</th></tr></thead><tbody>${rows||'<tr><td colspan="5">Tidak ada transaksi.</td></tr>'}</tbody></table><h3 style="margin-top:18px">Pengeluaran</h3><table><thead><tr><th>Tanggal</th><th>Kategori</th><th>Keterangan</th><th>Jumlah</th></tr></thead><tbody>${exRows||'<tr><td colspan="4">Tidak ada pengeluaran.</td></tr>'}</tbody></table><div class="summary"><table><tr><th>Omzet</th><td class="num">${rupiah(omzet)}</td></tr><tr><th>HPP</th><td class="num">${rupiah(hpp)}</td></tr><tr><th>Laba Kotor</th><td class="num">${rupiah(laba)}</td></tr><tr><th>Pengeluaran</th><td class="num">${rupiah(keluar)}</td></tr><tr><th>Laba Bersih</th><td class="num"><b>${rupiah(net)}</b></td></tr></table></div>`;
+            const rows = tx.map(t => `<tr><td>${formatDateID(t.date)}</td><td>${t.cashierName || t.createdByName || 'Kasir'}</td><td>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</td><td class="num">${rupiah(t.total)}</td><td class="num">${rupiah(t.hpp)}</td><td class="num">${rupiah(t.total-t.hpp)}</td></tr>`).join('');
+            const exRows = ex.filter(e => recordBelongsToCurrentUser(e, 'expense')).map(e => `<tr><td>${formatDateID(e.date)}</td><td>${e.createdByName || e.cashierName || '—'}</td><td>${e.cat}</td><td>${e.note||'-'}</td><td class="num">${rupiah(e.amount)}</td></tr>`).join('');
+            const body = reportHeader('LAPORAN LABA RUGI', r.from, r.to) + `<h3>Pendapatan & HPP</h3><table><thead><tr><th>Tanggal</th><th>Nama Kasir</th><th>Transaksi</th><th>Omzet</th><th>HPP</th><th>Laba Kotor</th></tr></thead><tbody>${rows||'<tr><td colspan="6">Tidak ada transaksi.</td></tr>'}</tbody></table><h3 style="margin-top:18px">Pengeluaran</h3><table><thead><tr><th>Tanggal</th><th>Nama Kasir</th><th>Kategori</th><th>Keterangan</th><th>Jumlah</th></tr></thead><tbody>${exRows||'<tr><td colspan="5">Tidak ada pengeluaran.</td></tr>'}</tbody></table><div class="summary"><table><tr><th>Omzet</th><td class="num">${rupiah(omzet)}</td></tr><tr><th>HPP</th><td class="num">${rupiah(hpp)}</td></tr><tr><th>Laba Kotor</th><td class="num">${rupiah(laba)}</td></tr><tr><th>Pengeluaran</th><td class="num">${rupiah(keluar)}</td></tr><tr><th>Laba Bersih</th><td class="num"><b>${rupiah(net)}</b></td></tr></table></div>`;
             openPrintWindow('Laporan Laba Rugi', body);
         }
 
@@ -4641,8 +4651,8 @@ let pendingPurchaseBahanId = null;
             const r = getReportRange(),
                 rows = rangePurchases(r.from, r.to).slice().sort((a, b) => String(a.date).localeCompare(String(b.date))),
                 total = rows.reduce((a, x) => a + (+x.total || 0), 0);
-            const tr = rows.map(x => `<tr><td>${formatDateID(x.date)}</td><td>${x.bahanName}</td><td class="num">${formatQty(x.packages||0)}</td><td class="num">${formatQty(x.qty)} ${x.unit}</td><td class="num">${rupiah(x.cost)}</td><td class="num">${rupiah(x.total)}</td><td>${x.note||'-'}</td></tr>`).join('');
-            const body = reportHeader('LAPORAN PEMBELIAN BAHAN', r.from, r.to) + `<table><thead><tr><th>Tanggal</th><th>Bahan</th><th>Kemasan</th><th>Isi Masuk</th><th>Harga/Kemasan</th><th>Total</th><th>Keterangan</th></tr></thead><tbody>${tr||'<tr><td colspan="7">Tidak ada pembelian.</td></tr>'}</tbody></table><div class="summary"><table><tr><th>Total Pembelian</th><td class="num"><b>${rupiah(total)}</b></td></tr></table></div>`;
+            const tr = rows.map(x => `<tr><td>${formatDateID(x.date)}</td><td>${x.createdByName || x.cashierName || '—'}</td><td>${x.bahanName}</td><td class="num">${formatQty(x.packages||0)}</td><td class="num">${formatQty(x.qty)} ${x.unit}</td><td class="num">${rupiah(x.cost)}</td><td class="num">${rupiah(x.total)}</td><td>${x.note||'-'}</td></tr>`).join('');
+            const body = reportHeader('LAPORAN PEMBELIAN BAHAN', r.from, r.to) + `<table><thead><tr><th>Tanggal</th><th>Nama Kasir</th><th>Bahan</th><th>Kemasan</th><th>Isi Masuk</th><th>Harga/Kemasan</th><th>Total</th><th>Keterangan</th></tr></thead><tbody>${tr||'<tr><td colspan="8">Tidak ada pembelian.</td></tr>'}</tbody></table><div class="summary"><table><tr><th>Total Pembelian</th><td class="num"><b>${rupiah(total)}</b></td></tr></table></div>`;
             openPrintWindow('Laporan Pembelian', body);
         }
 
@@ -4976,15 +4986,18 @@ let pendingPurchaseBahanId = null;
                 dailySales.set(t.date, day);
             });
             const rows = [];
-            dailySales.forEach((v, date) => rows.push({ date, type: 'Penjualan harian', note: `Tunai ${rupiah(v.cash)} · Non-tunai ${rupiah(v.noncash)}`, masuk: v.total, keluar: 0, order: 1 }));
-            (db.purchases || []).filter(x => recordBelongsToCurrentUser(x, 'purchase') && x.date >= from && x.date <= to).forEach(x => rows.push({ date: x.date, type: 'Pembelian bahan', note: `${x.bahanName || 'Pembelian'}${x.note ? ' — ' + x.note : ''}`, masuk: 0, keluar: Number(x.total) || 0, order: 2 }));
-            (db.expenses || []).filter(x => recordBelongsToCurrentUser(x, 'expense') && x.date >= from && x.date <= to).forEach(x => rows.push({ date: x.date, type: 'Pengeluaran', note: `${x.cat || 'Operasional'}${x.note ? ' — ' + x.note : ''}`, masuk: 0, keluar: Number(x.amount) || 0, order: 3 }));
+            (db.transactions || []).filter(t => recordBelongsToCurrentUser(t, 'transaction') && t.date >= from && t.date <= to).forEach(t => {
+                const paid = Math.max(0, Number(t.paidAmount ?? (t.status === 'lunas' ? t.total : 0)) || 0);
+                rows.push({ date: t.date, cashierName: t.cashierName || t.createdByName || '—', type: 'Penjualan', note: `${t.pay || 'Pembayaran'} · ${(t.items || []).map(i => `${i.name} ×${i.qty}`).join(', ')}`, masuk: paid, keluar: 0, order: 1 });
+            });
+            (db.purchases || []).filter(x => recordBelongsToCurrentUser(x, 'purchase') && x.date >= from && x.date <= to).forEach(x => rows.push({ date: x.date, cashierName: x.createdByName || x.cashierName || '—', type: 'Pembelian bahan', note: `${x.bahanName || 'Pembelian'}${x.note ? ' — ' + x.note : ''}`, masuk: 0, keluar: Number(x.total) || 0, order: 2 }));
+            (db.expenses || []).filter(x => recordBelongsToCurrentUser(x, 'expense') && x.date >= from && x.date <= to).forEach(x => rows.push({ date: x.date, cashierName: x.createdByName || x.cashierName || '—', type: 'Pengeluaran', note: `${x.cat || 'Operasional'}${x.note ? ' — ' + x.note : ''}`, masuk: 0, keluar: Number(x.amount) || 0, order: 3 }));
             (db.settings.cashEntries || []).filter(x => recordBelongsToCurrentUser(x, 'cashEntry') && x.date >= from && x.date <= to).forEach(x => {
                 const inCash = x.type === 'modal' || x.type === 'tarik';
                 const labels = { modal: 'Tambah modal', setor: 'Setor kas (keluar laci)', tarik: 'Transaksi kas lama' };
-                rows.push({ date: x.date, type: labels[x.type] || 'Transaksi kas', note: `${x.note || '-'}${x.createdBy ? ' · ' + x.createdBy : ''}`, masuk: inCash ? Number(x.amount) || 0 : 0, keluar: inCash ? 0 : Number(x.amount) || 0, order: 0 });
+                rows.push({ date: x.date, cashierName: x.createdBy || currentUserName || '—', type: labels[x.type] || 'Transaksi kas', note: x.note || '-', masuk: inCash ? Number(x.amount) || 0 : 0, keluar: inCash ? 0 : Number(x.amount) || 0, order: 0 });
             });
-            if (opening.date >= from && opening.date <= to && Number(opening.amount) > 0) rows.push({ date: opening.date, type: 'Saldo awal', note: cashierView ? 'Saldo awal kasir' : 'Saldo awal kas tunai', masuk: Number(opening.amount) || 0, keluar: 0, order: -1 });
+            if (opening.date >= from && opening.date <= to && Number(opening.amount) > 0) rows.push({ date: opening.date, cashierName: cashierView ? (currentUserName || 'Kasir') : 'Admin', type: 'Saldo awal', note: cashierView ? 'Saldo awal kasir' : 'Saldo awal kas tunai', masuk: Number(opening.amount) || 0, keluar: 0, order: -1 });
             rows.sort((a,b) => a.date.localeCompare(b.date) || a.order-b.order || a.type.localeCompare(b.type));
             const masuk = rows.reduce((a,x)=>a+x.masuk,0), keluar = rows.reduce((a,x)=>a+x.keluar,0);
             const cashEntries = (db.settings.cashEntries || []).filter(x => recordBelongsToCurrentUser(x, 'cashEntry') && x.date >= (opening.date || '0000-00-00') && x.date <= today());
@@ -5007,7 +5020,7 @@ let pendingPurchaseBahanId = null;
             if (el('cashTotalOut')) el('cashTotalOut').textContent = rupiah(periodPurchases + periodExpenses + rows.filter(x => x.type === 'Setor kas (keluar laci)').reduce((a,x)=>a+x.keluar,0));
             if (el('cashTotalOutDetails')) el('cashTotalOutDetails').textContent = `Setor kas ${rupiah(rows.filter(x => x.type === 'Setor kas (keluar laci)').reduce((a,x)=>a+x.keluar,0))} · Pembelian bahan ${rupiah(periodPurchases)} · Pengeluaran operasional ${rupiah(periodExpenses)}`;
             if (el('cashFlowSummary')) el('cashFlowSummary').innerHTML = '';
-            if (el('cashFlowTable')) el('cashFlowTable').innerHTML = rows.map(x=>`<tr><td>${formatDateID(x.date)}</td><td>${x.type}</td><td>${x.note}</td><td>${x.masuk ? rupiah(x.masuk) : '-'}</td><td>${x.keluar ? rupiah(x.keluar) : '-'}</td></tr>`).join('') || '<tr><td colspan="5"><div class="empty">Belum ada arus kas pada periode ini.</div></td></tr>';
+            if (el('cashFlowTable')) el('cashFlowTable').innerHTML = rows.map(x=>`<tr><td>${formatDateID(x.date)}</td><td>${x.cashierName || '—'}</td><td>${x.type}</td><td>${x.note}</td><td>${x.masuk ? rupiah(x.masuk) : '-'}</td><td>${x.keluar ? rupiah(x.keluar) : '-'}</td></tr>`).join('') || '<tr><td colspan="6"><div class="empty">Belum ada arus kas pada periode ini.</div></td></tr>';
         }
 
         function printCashFlow() {
@@ -5025,7 +5038,7 @@ let pendingPurchaseBahanId = null;
             const body = reportHeader('LAPORAN ARUS KAS', from, to) + `
                 <table class="summary-cards"><thead><tr><th>Saldo Kas Tunai</th><th>Total Uang Masuk</th><th>Total Uang Keluar</th></tr></thead>
                 <tbody><tr><td><b>${balance || '-'}</b></td><td><b>${totalIn}</b><br><small>${totalInDetails}</small></td><td><b>${totalOut}</b><br><small>${totalOutDetails}</small></td></tr></tbody></table>
-                <h3>Rincian Arus Kas</h3><table><thead><tr><th>Tanggal</th><th>Jenis</th><th>Keterangan</th><th>Uang Masuk</th><th>Uang Keluar</th></tr></thead><tbody>${rows || '<tr><td colspan="5">Tidak ada transaksi pada periode ini.</td></tr>'}</tbody></table>
+                <h3>Rincian Arus Kas</h3><table><thead><tr><th>Tanggal</th><th>Nama Kasir</th><th>Jenis</th><th>Keterangan</th><th>Uang Masuk</th><th>Uang Keluar</th></tr></thead><tbody>${rows || '<tr><td colspan="6">Tidak ada transaksi pada periode ini.</td></tr>'}</tbody></table>
                 <p style="margin-top:18px;font-size:10px">Dicetak pada ${new Date().toLocaleString('id-ID')}</p>`;
             openPrintWindow('Laporan Arus Kas', body);
         }
