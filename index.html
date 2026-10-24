@@ -2654,10 +2654,10 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
             </section>
 
             <section id="keuangan" class="page">
-                <div class="cards">
-                    <div class="card metric"><div><small>Saldo Kas Tunai</small><strong id="cashBalance">Rp0</strong><div class="trend">Saldo laci berdasarkan penjualan tunai, modal, setor kas, pembelian, dan pengeluaran</div></div><div class="icon">💵</div></div>
-                    <div class="card metric"><div><small>Penjualan Hari Ini</small><strong id="cashSalesToday">Rp0</strong><div class="trend">Akumulasi transaksi hari ini</div></div><div class="icon">🧾</div></div>
-                    <div class="card metric"><div><small>Modal Tambahan</small><strong id="cashCapitalTotal">Rp0</strong><div class="trend">Total tambahan modal tercatat</div></div><div class="icon">➕</div></div>
+                <div class="cards cash-finance-cards">
+                    <div class="card metric"><div><small>Saldo Kas Tunai</small><strong id="cashBalance">Rp0</strong><div class="trend">Saldo uang tunai di laci kasir</div></div><div class="icon">💵</div></div>
+                    <div class="card metric"><div><small>Total Uang Masuk</small><strong id="cashTotalIn">Rp0</strong><div class="trend" id="cashTotalInDetails">Tambahan modal · Penjualan tunai · Penjualan non-tunai</div></div><div class="icon">📥</div></div>
+                    <div class="card metric"><div><small>Total Uang Keluar</small><strong id="cashTotalOut">Rp0</strong><div class="trend" id="cashTotalOutDetails">Pembelian bahan · Pengeluaran operasional</div></div><div class="icon">📤</div></div>
                 </div>
                 <div class="card no-print" style="margin-top:18px">
                     <div class="section-title"><div><h2>Pengaturan Saldo Awal</h2><small style="color:var(--muted)">Masukkan saldo tunai awal satu kali atau ubah jika diperlukan.</small></div></div>
@@ -4913,9 +4913,16 @@ let pendingPurchaseBahanId = null;
             const cashBalance = (Number(opening.amount)||0) + cashSales + capitalTotal + transfers - cashPurchases - cashExpenses;
             const el = id => document.getElementById(id);
             if (el('cashBalance')) el('cashBalance').textContent = rupiah(cashBalance);
-            if (el('cashSalesToday')) el('cashSalesToday').textContent = rupiah(todaySales);
-            if (el('cashCapitalTotal')) el('cashCapitalTotal').textContent = rupiah(capitalTotal);
-            if (el('cashFlowSummary')) el('cashFlowSummary').innerHTML = `<div class="card metric"><div><small>Total Uang Masuk</small><strong>${rupiah(masuk)}</strong></div></div><div class="card metric"><div><small>Total Uang Keluar</small><strong>${rupiah(keluar)}</strong></div></div><div class="card metric"><div><small>Selisih Periode</small><strong>${rupiah(masuk-keluar)}</strong></div></div>`;
+            const periodCapital = rows.filter(x => x.type === 'Tambah modal').reduce((a,x)=>a+x.masuk,0);
+            const periodCashSales = [...dailySales.values()].reduce((a,x)=>a+x.cash,0);
+            const periodNoncashSales = [...dailySales.values()].reduce((a,x)=>a+x.noncash,0);
+            const periodPurchases = rows.filter(x => x.type === 'Pembelian bahan').reduce((a,x)=>a+x.keluar,0);
+            const periodExpenses = rows.filter(x => x.type === 'Pengeluaran').reduce((a,x)=>a+x.keluar,0);
+            if (el('cashTotalIn')) el('cashTotalIn').textContent = rupiah(periodCapital + periodCashSales + periodNoncashSales);
+            if (el('cashTotalInDetails')) el('cashTotalInDetails').textContent = `Tambahan modal ${rupiah(periodCapital)} · Penjualan tunai ${rupiah(periodCashSales)} · Non-tunai ${rupiah(periodNoncashSales)}`;
+            if (el('cashTotalOut')) el('cashTotalOut').textContent = rupiah(periodPurchases + periodExpenses);
+            if (el('cashTotalOutDetails')) el('cashTotalOutDetails').textContent = `Pembelian bahan ${rupiah(periodPurchases)} · Pengeluaran operasional ${rupiah(periodExpenses)}`;
+            if (el('cashFlowSummary')) el('cashFlowSummary').innerHTML = '';
             if (el('cashFlowTable')) el('cashFlowTable').innerHTML = rows.map(x=>`<tr><td>${x.date}</td><td>${x.type}</td><td>${x.note}</td><td>${x.masuk ? rupiah(x.masuk) : '-'}</td><td>${x.keluar ? rupiah(x.keluar) : '-'}</td></tr>`).join('') || '<tr><td colspan="5"><div class="empty">Belum ada arus kas pada periode ini.</div></td></tr>';
         }
 
