@@ -2432,7 +2432,7 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
                         <div class="icon">📈</div>
                     </div>
                     <div class="card metric">
-                        <div><small>Pengeluaran</small><strong id="mKeluar">Rp0</strong>
+                        <div><small>Pembelian</small><strong id="mKeluar">Rp0</strong>
                             <div class="trend">Hari ini</div>
                         </div>
                         <div class="icon">💸</div>
@@ -3490,11 +3490,16 @@ let pendingPurchaseBahanId = null;
             let tx = todayTx(),
                 om = tx.reduce((a, b) => a + b.total, 0),
                 hp = tx.reduce((a, b) => a + b.hpp, 0),
-                ex = db.expenses.filter(x => x.date === today()).reduce((a, b) => a + b.amount, 0);
+                ex = db.expenses.filter(x => x.date === today()).reduce((a, b) => a + b.amount, 0),
+                purchaseToday = (db.purchases || []).filter(x => x.date === today()).reduce((a, b) => a + (+b.total || 0), 0);
             mOmzet.textContent = rupiah(om);
             mHpp.textContent = rupiah(hp);
             mLaba.textContent = rupiah(om - hp);
-            mKeluar.textContent = rupiah(ex);
+            // Untuk Kasir, kartu berlabel Pembelian menampilkan total pembelian hari ini.
+            // Untuk Admin, pertahankan nilai Pengeluaran seperti sebelumnya.
+            mKeluar.textContent = rupiah(isKasirClient() ? purchaseToday : ex);
+            const purchaseTrend = document.querySelector('#dashboard .card.metric:has(#mKeluar) .trend');
+            if (purchaseTrend) purchaseTrend.textContent = isKasirClient() ? 'Total pembelian hari ini' : 'Hari ini';
 
             const unpaid = db.transactions.filter(t => (t.status || 'lunas') !== 'lunas');
             const unpaidTotal = unpaid.reduce((a, t) => a + Math.max(0, (+t.total || 0) - (+t.paidAmount || 0)), 0);
