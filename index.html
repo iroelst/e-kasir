@@ -2528,6 +2528,10 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
                         <div class="section-title">
                             <h2>Pesanan</h2><button class="btn" onclick="clearCart()">Kosongkan</button>
                         </div>
+                        <div class="field" style="margin-bottom:14px">
+                            <label for="posTransactionDate">TANGGAL TRANSAKSI</label>
+                            <input id="posTransactionDate" type="date" aria-label="Tanggal transaksi">
+                        </div>
                         <div id="cart"></div>
                         <div class="summary">
                             <div><span>Subtotal</span><b id="subtotal">Rp0</b></div>
@@ -3690,6 +3694,11 @@ let pendingPurchaseBahanId = null;
         function checkout() {
             if (!cart.length) return toast('Keranjang masih kosong');
 
+            const dateInput = document.getElementById('posTransactionDate');
+            if (dateInput && !dateInput.value) dateInput.value = today();
+            const transactionDate = dateInput?.value || today();
+            if (transactionDate > today()) return toast('Tanggal transaksi tidak boleh melebihi hari ini');
+
             const rr = defaultRange(), need = {};
             cart.forEach(it => {
                 const r = db.recipes.find(x => x.menuId === it.id);
@@ -3713,6 +3722,7 @@ let pendingPurchaseBahanId = null;
                 items: cart.map(i => ({ ...i })),
                 total,
                 hpp,
+                date: transactionDate,
                 pay: pay || 'Tunai'
             };
             openPaymentModal();
@@ -3824,7 +3834,7 @@ let pendingPurchaseBahanId = null;
             const d = new Date();
             const record = {
                 id: db.nextId++,
-                date: today(),
+                date: pendingCheckout.date || today(),
                 time: d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
                 items: pendingCheckout.items.map(i => ({ ...i })),
                 total: +pendingCheckout.total || 0,
