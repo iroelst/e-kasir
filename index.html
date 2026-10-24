@@ -2734,6 +2734,7 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
                             <thead>
                                 <tr>
                                     <th>Tanggal</th>
+                                    <th>Nama Kasir</th>
                                     <th>Item</th>
                                     <th>Pembayaran</th>
                                     <th>Status</th>
@@ -4045,7 +4046,7 @@ let pendingPurchaseBahanId = null;
                 const cls = status === 'lunas' ? 'status-paid' : status === 'sebagian' ? 'status-partial' : 'status-unpaid';
                 const label = status === 'lunas' ? 'Lunas' : status === 'sebagian' ? 'Belum Lunas' : 'Belum Bayar';
                 const remaining = Math.max(0, (+t.total || 0) - (+t.paidAmount || 0));
-                return `<tr><td>${t.date} ${t.time}</td><td>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</td><td>${t.pay}</td><td><span class="badge ${cls}">${label}</span></td><td>${remaining ? rupiah(remaining) : '-'}</td><td>${rupiah(t.total)}</td><td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td><td class="no-print"><button class="btn" onclick="openThermalOptions(${t.id})">🧾 Nota</button>${status !== 'lunas' ? `<button class="btn" style="margin-left:5px" onclick="openSettlePayment(${t.id})">💳 Bayar</button>` : ''}</td></tr>`;
+                return `<tr><td>${t.date} ${t.time}</td><td>${t.cashierName || '—'}</td><td>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</td><td>${t.pay}</td><td><span class="badge ${cls}">${label}</span></td><td>${remaining ? rupiah(remaining) : '-'}</td><td>${rupiah(t.total)}</td><td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td><td class="no-print"><button class="btn" onclick="openThermalOptions(${t.id})">🧾 Nota</button>${status !== 'lunas' ? `<button class="btn" style="margin-left:5px" onclick="openSettlePayment(${t.id})">💳 Bayar</button>` : ''}</td></tr>`;
             }).join('') || `<tr><td colspan="${isKasirClient() ? 7 : 9}"><div class="empty">Belum ada transaksi pada periode ini.</div></td></tr>`;
         }
 
@@ -4930,21 +4931,12 @@ let pendingPurchaseBahanId = null;
 
         function printCashFlow() {
             if (!isAdminClient()) return toast('Hanya Admin yang dapat mencetak arus kas.');
+            const page = document.getElementById('keuangan');
+            if (!page) return;
             renderCashFinance();
-            const from = document.getElementById('cashReportFrom')?.value || '-';
-            const to = document.getElementById('cashReportTo')?.value || '-';
-            const shop = db.settings?.name || 'USAHA';
-            const address = db.settings?.address || '';
-            const phone = db.settings?.phone || '';
-            const logo = db.settings?.logo ? `<img src="${db.settings.logo}" style="max-width:85px;max-height:65px;object-fit:contain">` : '';
-            const rows = [...document.querySelectorAll('#cashFlowTable tr')].map(tr => `<tr>${[...tr.children].map(td=>`<td>${td.innerHTML}</td>`).join('')}</tr>`).join('');
-            const summary = document.getElementById('cashFlowSummary')?.innerText || '';
-            const w = window.open('', '_blank', 'width=1000,height=750');
-            if (!w) return toast('Izinkan pop-up browser untuk mencetak laporan.');
-            w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Laporan Arus Kas</title><style>
-              @page{size:A4 portrait;margin:15mm}*{box-sizing:border-box}body{font:12px Arial,sans-serif;color:#111;margin:0}.kop{display:flex;align-items:center;gap:16px;border-bottom:3px double #111;padding-bottom:10px;margin-bottom:18px}.logo{width:90px;text-align:center}.identitas{flex:1;text-align:center}.identitas h1{font-size:20px;margin:0 0 6px;text-transform:uppercase}.identitas p{margin:3px 0;font-size:11px}.judul{text-align:center;margin:16px 0}.judul h2{font-size:16px;margin:0 0 6px}.periode{text-align:center;margin-bottom:14px} .ringkasan{white-space:pre-line;border:1px solid #aaa;padding:8px;margin-bottom:12px;font-weight:bold}table{width:100%;border-collapse:collapse}th,td{border:1px solid #555;padding:7px;text-align:left}th{background:#e9eef5}td:nth-child(4),td:nth-child(5){text-align:right}.ttd{margin:40px 25px 0 auto;text-align:center;width:220px}@media print{button{display:none}}
-            </style></head><body><header class="kop"><div class="logo">${logo}</div><div class="identitas"><h1>${shop}</h1><p>${address}</p><p>${phone ? 'Telepon: '+phone : ''}</p></div></header><div class="judul"><h2>LAPORAN ARUS KAS</h2><div>e-Kasir</div></div><div class="periode">Periode: ${from} s.d. ${to}</div><div class="ringkasan">${summary}</div><table><thead><tr><th>Tanggal</th><th>Jenis</th><th>Keterangan</th><th>Uang Masuk</th><th>Uang Keluar</th></tr></thead><tbody>${rows}</tbody></table><div class="ttd">Mengetahui,<br><br><br><br><b>${shop}</b></div><script>window.onload=()=>{window.print()}<\/script></body></html>`);
-            w.document.close();
+            page.classList.add('print-target');
+            window.print();
+            setTimeout(() => page.classList.remove('print-target'), 700);
         }
 
         function renderAll() {
