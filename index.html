@@ -4860,7 +4860,7 @@ let pendingPurchaseBahanId = null;
 
         function openAddKasirModal() {
             if (!isAdminClient()) return toast('Hanya Admin yang dapat menambahkan Kasir.');
-            openModal('Tambah User Kasir', `<form id="addKasirForm" onsubmit="createKasirUser(event)">
+            openModal('Tambah User Kasir', `<form id="addKasirForm" onsubmit="return window.createKasirUser(event)">
                 <div class="form-grid">
                     <div class="field full"><label>NAMA KASIR</label><input id="kasirName" required placeholder="Contoh: Budi"></div>
                     <div class="field full"><label>EMAIL</label><input id="kasirEmail" type="email" required placeholder="kasir@email.com"></div>
@@ -4875,14 +4875,25 @@ let pendingPurchaseBahanId = null;
         async function createKasirUser(ev) {
             ev.preventDefault();
             if (!isAdminClient()) return toast('Hanya Admin yang dapat menambahkan Kasir.');
-            if (!firebaseReady) return toast('Firebase belum siap.');
-            const name = document.getElementById('kasirName').value.trim();
-            const email = document.getElementById('kasirEmail').value.trim().toLowerCase();
-            const password = document.getElementById('kasirPassword').value;
-            const password2 = document.getElementById('kasirPassword2').value;
+            if (!firebaseReady || !window.fbFs) {
+                toast('Firebase belum siap. Muat ulang halaman dan login kembali.');
+                return false;
+            }
+            const nameEl = document.getElementById('kasirName');
+            const emailEl = document.getElementById('kasirEmail');
+            const passEl = document.getElementById('kasirPassword');
+            const pass2El = document.getElementById('kasirPassword2');
             const btn = document.getElementById('saveKasirBtn');
-            if (password !== password2) return toast('Konfirmasi password tidak sama.');
-            if (password.length < 6) return toast('Password minimal 6 karakter.');
+            if (!nameEl || !emailEl || !passEl || !pass2El || !btn) {
+                toast('Form Kasir tidak lengkap. Tutup lalu buka kembali.');
+                return false;
+            }
+            const name = nameEl.value.trim();
+            const email = emailEl.value.trim().toLowerCase();
+            const password = passEl.value;
+            const password2 = pass2El.value;
+            if (password !== password2) { toast('Konfirmasi password tidak sama.'); return false; }
+            if (password.length < 6) { toast('Password minimal 6 karakter.'); return false; }
             btn.disabled = true;
             btn.textContent = 'Membuat akun...';
             try {
@@ -4908,12 +4919,24 @@ let pendingPurchaseBahanId = null;
                 toast('User Kasir berhasil dibuat.');
             } catch (e) {
                 console.error('createKasirUser:', e);
-                let msg = e?.code === 'auth/email-already-in-use' ? 'Email sudah terdaftar.' : (e?.message || 'Gagal membuat akun Kasir.');
+                let msg = e?.code === 'auth/email-already-in-use'
+                    ? 'Email sudah terdaftar di Firebase Authentication.'
+                    : e?.code === 'auth/operation-not-allowed'
+                      ? 'Metode Email/Password belum diaktifkan di Firebase Authentication.'
+                      : e?.code === 'auth/weak-password'
+                        ? 'Password terlalu lemah. Gunakan minimal 6 karakter.'
+                        : e?.code === 'auth/invalid-email'
+                          ? 'Format email tidak valid.'
+                          : (e?.message || 'Gagal membuat akun Kasir.');
                 toast(msg);
             } finally {
                 if (btn) { btn.disabled = false; btn.textContent = 'Buat Akun Kasir'; }
             }
         }
+
+        // Pastikan handler form tetap dapat dipanggil dari HTML modal yang dibuat dinamis.
+        // Ini juga mencegah form melakukan reload halaman tanpa menjalankan proses Firebase.
+        window.createKasirUser = createKasirUser;
 
         async function openEditKasirModal(uid) {
             if (!isAdminClient()) return toast('Hanya Admin yang dapat mengubah user.');
