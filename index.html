@@ -3600,7 +3600,7 @@ let pendingPurchaseBahanId = null;
                 const status = t.status || 'lunas';
                 const cls = status === 'lunas' ? 'status-paid' : status === 'sebagian' ? 'status-partial' : 'status-unpaid';
                 const label = status === 'lunas' ? 'Lunas' : status === 'sebagian' ? 'Belum Lunas' : 'Belum Bayar';
-                return `<div class="cart-item"><div><b>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</b><small style="display:block;color:var(--muted)">${t.time} · ${t.pay} · <span class="badge ${cls}">${label}</span></small></div><div style="display:flex;align-items:center;gap:8px"><b>${rupiah(t.total)}</b><button class="btn no-print" onclick="openThermalOptions(${t.id})">🧾</button></div></div>`;
+                return `<div class="cart-item"><div><b>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</b><small style="display:block;color:var(--muted)">${t.time} · ${t.pay} · <span class="badge ${cls}">${label}</span></small></div><div style="display:flex;align-items:center;gap:8px"><b>${rupiah(t.total)}</b><button class="btn no-print" onclick="printThermal(${t.id},80)">🧾</button></div></div>`;
             }).join('') : '<div class="empty">Belum ada transaksi hari ini.</div>'
         }
 
@@ -3895,7 +3895,7 @@ let pendingPurchaseBahanId = null;
         }
 
         function openPaymentSuccess(t) {
-            // Langsung buka pratinjau cetak nota thermal tanpa pilihan tambahan.
+            // Buka pratinjau thermal dengan pilihan ukuran dan tombol cetak.
             printThermal(t.id, 80);
         }
 
@@ -4658,7 +4658,7 @@ let pendingPurchaseBahanId = null;
                     <div class="center thanks">Terima kasih</div>
                 </main>`;
 
-            const w = window.open('', '_blank', 'width=420,height=700');
+            const w = window.open('', '_blank', 'width=520,height=800');
             if (!w) {
                 toast('Popup diblokir browser. Izinkan popup untuk mencetak nota thermal.');
                 return;
@@ -4670,11 +4670,14 @@ let pendingPurchaseBahanId = null;
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Nota Thermal ${esc(t.id)}</title>
 <style>
-    @page { margin: 2mm; }
+    @page { size: auto; margin: 2mm; }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; background: #fff; color: #000; }
-    body { font-family: Arial, sans-serif; font-size: ${width === 57 ? '10px' : '12px'}; line-height: 1.35; }
-    .receipt { width: ${width - 6}mm; max-width: 100%; margin: 0 auto; overflow-wrap: anywhere; }
+    body { font-family: Arial, sans-serif; font-size: 12px; line-height: 1.35; }
+    .toolbar { position: sticky; top: 0; background: #eef2f7; padding: 12px; display:flex; gap:10px; align-items:center; justify-content:center; border-bottom:1px solid #cbd5e1; }
+    .toolbar select,.toolbar button { font: inherit; padding:8px 12px; border:1px solid #64748b; border-radius:6px; background:#fff; color:#111; }
+    .toolbar button { background:#1d4ed8; color:white; font-weight:bold; cursor:pointer; }
+    .receipt { width: ${width - 6}mm; max-width: 100%; margin: 12px auto; overflow-wrap: anywhere; font-size:${width === 57 ? '10px' : '12px'}; }
     h1 { margin: 0 0 3px; text-align: center; font-size: ${width === 57 ? '14px' : '17px'}; line-height: 1.2; }
     .center { text-align: center; }
     .logo { text-align: center; margin: 0 0 4px; }
@@ -4687,27 +4690,17 @@ let pendingPurchaseBahanId = null;
     .item-name { font-weight: 700; margin-bottom: 1px; }
     .total { font-size: ${width === 57 ? '12px' : '14px'}; }
     .thanks { margin: 5px 0 0; }
-    @media screen { body { padding: 3mm 0; } }
-    @media print { html, body { width: 100%; margin: 0; padding: 0; } .receipt { margin: 0 auto; } }
-</style></head><body>${receipt}
+    @media print { .no-print { display:none !important; } html, body { margin: 0; padding: 0; background:#fff; } .receipt { margin: 0; width: ${width - 6}mm; } }
+</style></head><body><div class="toolbar no-print"><label for="paperWidth">Ukuran:</label><select id="paperWidth" onchange="setWidth(this.value)"><option value="57" ${width===57?'selected':''}>Thermal 57 mm</option><option value="80" ${width===80?'selected':''}>Thermal 80 mm</option></select><button onclick="window.print()">Cetak Nota</button></div>${receipt}
 <script>
-    window.addEventListener('load', function () {
-        var imgs = Array.from(document.images);
-        Promise.all(imgs.map(function (img) {
-            if (img.complete) return Promise.resolve();
-            return new Promise(function (resolve) {
-                img.onload = resolve; img.onerror = resolve;
-            });
-        })).then(function () {
-            setTimeout(function () {
-                window.focus();
-                window.print();
-            }, 200);
-        });
-    });
-    window.addEventListener('afterprint', function () {
-        setTimeout(function () { window.close(); }, 150);
-    });
+    function setWidth(value) {
+        var mm = Number(value) === 57 ? 51 : 74;
+        var receipt = document.querySelector('.receipt');
+        receipt.style.width = mm + 'mm';
+        receipt.style.fontSize = Number(value) === 57 ? '10px' : '12px';
+        document.querySelector('.receipt h1').style.fontSize = Number(value) === 57 ? '14px' : '17px';
+        document.querySelector('.receipt .total').style.fontSize = Number(value) === 57 ? '12px' : '14px';
+    }
 <\/script>
 </body></html>`);
             w.document.close();
