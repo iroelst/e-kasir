@@ -3990,7 +3990,7 @@ let pendingPurchaseBahanId = null;
             stockUsageTotal.textContent = rupiah(usageTotal);
             stockEndingTotal.textContent = rupiah(endingTotal);
             stockPeriodStatus.textContent = `Periode ${r.from.split('-').reverse().join('/')} – ${r.to.split('-').reverse().join('/')} · Stok akhir dihitung otomatis`;
-            purchaseTable.innerHTML = rangePurchases(r.from, r.to).slice().reverse().map(m => `<tr><td>${m.date}</td><td><b>${m.bahanName}</b></td><td>${formatQty(m.packages||0)} kemasan</td><td>${formatQty(m.qty)} ${m.unit}</td><td>${rupiah(m.cost)}</td><td>${rupiah(m.total)}</td><td>${m.note||'-'}</td><td><div style="display:flex;gap:6px"><button class="btn" title="Edit pembelian" onclick="openPurchaseModal(${m.id})">✏️ Edit</button><button class="btn" title="Hapus pembelian" onclick="deletePurchase(${m.id})">🗑️ Hapus</button></div></td></tr>`).join('') || '<tr><td colspan="8"><div class="empty">Belum ada pembelian pada periode ini.</div></td></tr>';
+            purchaseTable.innerHTML = rangePurchases(r.from, r.to).slice().reverse().map(m => `<tr><td>${formatDateID(m.date)}</td><td><b>${m.bahanName}</b></td><td>${formatQty(m.packages||0)} kemasan</td><td>${formatQty(m.qty)} ${m.unit}</td><td>${rupiah(m.cost)}</td><td>${rupiah(m.total)}</td><td>${m.note||'-'}</td><td><div style="display:flex;gap:6px"><button class="btn" title="Edit pembelian" onclick="openPurchaseModal(${m.id})">✏️ Edit</button><button class="btn" title="Hapus pembelian" onclick="deletePurchase(${m.id})">🗑️ Hapus</button></div></td></tr>`).join('') || '<tr><td colspan="8"><div class="empty">Belum ada pembelian pada periode ini.</div></td></tr>';
             document.getElementById('stockFrom').value = r.from;
             document.getElementById('stockTo').value = r.to;
         }
@@ -4041,7 +4041,7 @@ let pendingPurchaseBahanId = null;
         }
 
         function renderExpenses() {
-            expenseTable.innerHTML = db.expenses.slice().reverse().map(e => `<tr><td>${e.date}</td><td>${e.cat}</td><td>${e.note}</td><td><b>${rupiah(e.amount)}</b></td><td><div style="display:flex;gap:6px"><button class="btn" title="Edit pengeluaran" onclick="openExpenseModal(${e.id})">✏️ Edit</button><button class="btn" title="Hapus pengeluaran" onclick="deleteExpense(${e.id})">🗑️ Hapus</button></div></td></tr>`).join('') || '<tr><td colspan="5"><div class="empty">Belum ada pengeluaran.</div></td></tr>'
+            expenseTable.innerHTML = db.expenses.slice().reverse().map(e => `<tr><td>${formatDateID(e.date)}</td><td>${e.cat}</td><td>${e.note}</td><td><b>${rupiah(e.amount)}</b></td><td><div style="display:flex;gap:6px"><button class="btn" title="Edit pengeluaran" onclick="openExpenseModal(${e.id})">✏️ Edit</button><button class="btn" title="Hapus pengeluaran" onclick="deleteExpense(${e.id})">🗑️ Hapus</button></div></td></tr>`).join('') || '<tr><td colspan="5"><div class="empty">Belum ada pengeluaran.</div></td></tr>'
         }
 
         function getReportRange() {
@@ -4074,13 +4074,13 @@ let pendingPurchaseBahanId = null;
             const r = getReportRange(),
                 tx = rangeTransactions(r.from, r.to).slice().reverse();
             const label = document.getElementById('reportPeriodLabel');
-            if (label) label.textContent = `${r.from.split('-').reverse().join('/')} – ${r.to.split('-').reverse().join('/')}`;
+            if (label) label.textContent = `${formatDateID(r.from)} – ${formatDateID(r.to)}`;
             reportTable.innerHTML = tx.map(t => {
                 const status = t.status || 'lunas';
                 const cls = status === 'lunas' ? 'status-paid' : status === 'sebagian' ? 'status-partial' : 'status-unpaid';
                 const label = status === 'lunas' ? 'Lunas' : status === 'sebagian' ? 'Belum Lunas' : 'Belum Bayar';
                 const remaining = Math.max(0, (+t.total || 0) - (+t.paidAmount || 0));
-                return `<tr><td>${t.date} ${t.time}</td><td>${t.cashierName || '—'}</td><td>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</td><td>${t.pay}</td><td><span class="badge ${cls}">${label}</span></td><td>${remaining ? rupiah(remaining) : '-'}</td><td>${rupiah(t.total)}</td><td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td><td class="no-print"><button class="btn" onclick="printThermal(${t.id},80)">🧾 Nota</button>${status !== 'lunas' ? `<button class="btn" style="margin-left:5px" onclick="openSettlePayment(${t.id})">💳 Bayar</button>` : ''}</td></tr>`;
+                return `<tr><td>${formatDateID(t.date)} ${t.time}</td><td>${t.cashierName || '—'}</td><td>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</td><td>${t.pay}</td><td><span class="badge ${cls}">${label}</span></td><td>${remaining ? rupiah(remaining) : '-'}</td><td>${rupiah(t.total)}</td><td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td><td class="no-print"><button class="btn" onclick="printThermal(${t.id},80)">🧾 Nota</button>${status !== 'lunas' ? `<button class="btn" style="margin-left:5px" onclick="openSettlePayment(${t.id})">💳 Bayar</button>` : ''}</td></tr>`;
             }).join('') || `<tr><td colspan="${isKasirClient() ? 7 : 9}"><div class="empty">Belum ada transaksi pada periode ini.</div></td></tr>`;
         }
 
@@ -4381,7 +4381,7 @@ let pendingPurchaseBahanId = null;
             if (!isAdminClient()) return toast('Hanya Admin yang dapat menghapus pembelian.');
             const p = db.purchases.find(x => x.id === id);
             if (!p) return toast('Data pembelian tidak ditemukan.');
-            if (!confirm(`Hapus pembelian ${p.bahanName} tanggal ${p.date}? Stok masuk dan nilai pembelian terkait akan ikut dibatalkan.`)) return;
+            if (!confirm(`Hapus pembelian ${p.bahanName} tanggal ${formatDateID(p.date)}? Stok masuk dan nilai pembelian terkait akan ikut dibatalkan.`)) return;
             db.purchases = db.purchases.filter(x => x.id !== id);
             db.stockMoves = db.stockMoves.filter(x => !(x.id === id && x.type === 'purchase'));
             recalculateStockPeriods();
@@ -4559,7 +4559,7 @@ let pendingPurchaseBahanId = null;
             const rows = [
                 ['Tanggal', 'Waktu', 'Item', 'Pembayaran', 'Omzet', 'HPP', 'Laba'],
                 ...rangeTransactions(r.from, r.to).map(t => [
-                    t.date, t.time, t.items.map(i => i.name + ' x' + i.qty).join(' | '), t.pay, t.total, t.hpp, t.total - t.hpp
+                    formatDateID(t.date), t.time, t.items.map(i => i.name + ' x' + i.qty).join(' | '), t.pay, t.total, t.hpp, t.total - t.hpp
                 ])
             ];
             const csv = rows.map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(',')).join('\\n');
@@ -4960,14 +4960,14 @@ let pendingPurchaseBahanId = null;
             if (el('cashTotalOut')) el('cashTotalOut').textContent = rupiah(periodPurchases + periodExpenses);
             if (el('cashTotalOutDetails')) el('cashTotalOutDetails').textContent = `Pembelian bahan ${rupiah(periodPurchases)} · Pengeluaran operasional ${rupiah(periodExpenses)}`;
             if (el('cashFlowSummary')) el('cashFlowSummary').innerHTML = '';
-            if (el('cashFlowTable')) el('cashFlowTable').innerHTML = rows.map(x=>`<tr><td>${x.date}</td><td>${x.type}</td><td>${x.note}</td><td>${x.masuk ? rupiah(x.masuk) : '-'}</td><td>${x.keluar ? rupiah(x.keluar) : '-'}</td></tr>`).join('') || '<tr><td colspan="5"><div class="empty">Belum ada arus kas pada periode ini.</div></td></tr>';
+            if (el('cashFlowTable')) el('cashFlowTable').innerHTML = rows.map(x=>`<tr><td>${formatDateID(x.date)}</td><td>${x.type}</td><td>${x.note}</td><td>${x.masuk ? rupiah(x.masuk) : '-'}</td><td>${x.keluar ? rupiah(x.keluar) : '-'}</td></tr>`).join('') || '<tr><td colspan="5"><div class="empty">Belum ada arus kas pada periode ini.</div></td></tr>';
         }
 
         function printCashFlow() {
             if (!isAdminClient()) return toast('Hanya Admin yang dapat mencetak arus kas.');
             renderCashFinance();
             const from = document.getElementById('cashReportFrom')?.value || periodKey() + '-01';
-            const to = document.getElementById('cashReportTo')?.value || new Date().toISOString().slice(0, 10);
+            const to = document.getElementById('cashReportTo')?.value || today();
             const tbody = document.getElementById('cashFlowTable');
             const rows = tbody ? tbody.innerHTML : '';
             const totalIn = document.getElementById('cashTotalIn')?.textContent || rupiah(0);
