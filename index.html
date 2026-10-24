@@ -3895,10 +3895,7 @@ let pendingPurchaseBahanId = null;
         }
 
         function openPaymentSuccess(t) {
-            // Otomatis buka dialog cetak setelah pembayaran lunas tersimpan.
-            // Ukuran default thermal 80 mm; popup dibuka langsung dalam alur klik pembayaran
-            // agar tidak mudah diblokir browser. Jika printer 57 mm, ubah angka 80 menjadi 57.
-            toast(`Pembayaran lunas. Membuka nota thermal untuk transaksi #${t.id}...`);
+            // Langsung buka pratinjau cetak nota thermal tanpa pilihan tambahan.
             printThermal(t.id, 80);
         }
 
@@ -4046,7 +4043,7 @@ let pendingPurchaseBahanId = null;
                 const cls = status === 'lunas' ? 'status-paid' : status === 'sebagian' ? 'status-partial' : 'status-unpaid';
                 const label = status === 'lunas' ? 'Lunas' : status === 'sebagian' ? 'Belum Lunas' : 'Belum Bayar';
                 const remaining = Math.max(0, (+t.total || 0) - (+t.paidAmount || 0));
-                return `<tr><td>${t.date} ${t.time}</td><td>${t.cashierName || '—'}</td><td>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</td><td>${t.pay}</td><td><span class="badge ${cls}">${label}</span></td><td>${remaining ? rupiah(remaining) : '-'}</td><td>${rupiah(t.total)}</td><td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td><td class="no-print"><button class="btn" onclick="openThermalOptions(${t.id})">🧾 Nota</button>${status !== 'lunas' ? `<button class="btn" style="margin-left:5px" onclick="openSettlePayment(${t.id})">💳 Bayar</button>` : ''}</td></tr>`;
+                return `<tr><td>${t.date} ${t.time}</td><td>${t.cashierName || '—'}</td><td>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</td><td>${t.pay}</td><td><span class="badge ${cls}">${label}</span></td><td>${remaining ? rupiah(remaining) : '-'}</td><td>${rupiah(t.total)}</td><td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td><td class="no-print"><button class="btn" onclick="printThermal(${t.id},80)">🧾 Nota</button>${status !== 'lunas' ? `<button class="btn" style="margin-left:5px" onclick="openSettlePayment(${t.id})">💳 Bayar</button>` : ''}</td></tr>`;
             }).join('') || `<tr><td colspan="${isKasirClient() ? 7 : 9}"><div class="empty">Belum ada transaksi pada periode ini.</div></td></tr>`;
         }
 
