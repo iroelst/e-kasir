@@ -3792,23 +3792,11 @@ let pendingPurchaseBahanId = null;
         }
 
         function openPaymentSuccess(t) {
-            openModal('Pembayaran Berhasil', `
-                <div class="payment-success">
-                    <div class="success-icon">✓</div>
-                    <h3>Pembayaran Lunas</h3>
-                    <p>Transaksi #${t.id} berhasil disimpan ke riwayat.</p>
-                    <div class="receipt-summary">
-                        <div><span>Total</span><b>${rupiah(t.total)}</b></div>
-                        <div><span>Pembayaran</span><b>${t.pay}</b></div>
-                        <div><span>Dibayar</span><b>${rupiah(t.paidAmount || t.total)}</b></div>
-                        ${t.pay === 'Tunai' ? `<div><span>Kembalian</span><b>${rupiah(t.change || 0)}</b></div>` : ''}
-                    </div>
-                    <div class="payment-actions">
-                        <button class="btn" type="button" onclick="closeModal()">Selesai</button>
-                        <button class="btn primary" type="button" onclick="openThermalOptions(${t.id})">🧾 Cetak Nota</button>
-                    </div>
-                </div>
-            `);
+            // Otomatis buka dialog cetak setelah pembayaran lunas tersimpan.
+            // Ukuran default thermal 80 mm; popup dibuka langsung dalam alur klik pembayaran
+            // agar tidak mudah diblokir browser. Jika printer 57 mm, ubah angka 80 menjadi 57.
+            toast(`Pembayaran lunas. Membuka nota thermal untuk transaksi #${t.id}...`);
+            printThermal(t.id, 80);
         }
 
 
@@ -4509,24 +4497,120 @@ let pendingPurchaseBahanId = null;
         function openThermalOptions(id) {
             const t = db.transactions.find(x => x.id === id);
             if (!t) return toast('Transaksi tidak ditemukan');
-            openModal('Cetak Nota Thermal', `<p style="margin-top:0;color:var(--muted)">Pilih ukuran kertas thermal.</p><div class="pay"><button onclick="printThermal(${id},57)">Thermal 57 mm</button><button class="active" onclick="printThermal(${id},80)">Thermal 80 mm</button></div><button class="btn" style="width:100%;margin-top:10px" onclick="closeModal()">Batal</button>`);
+            openModal('Cetak Nota Thermal', `
+                <p style="margin-top:0;color:var(--muted)">Nota hanya dicetak menggunakan printer thermal.</p>
+                <div class="pay">
+                    <button type="button" onclick="printThermal(${Number(id)},57)">Thermal 57 mm</button>
+                    <button type="button" class="active" onclick="printThermal(${Number(id)},80)">Thermal 80 mm</button>
+                </div>
+                <button type="button" class="btn" style="width:100%;margin-top:10px" onclick="closeModal()">Batal</button>
+            `);
         }
 
         function printThermal(id, width) {
-            const t = db.transactions.find(x => x.id === id);
-            if (!t) return;
-            const items = t.items.map(i => `<div class="item"><div class="item-name">${i.name}</div><div class="row"><span>${i.qty} × ${rupiah(i.price)}</span><span>${rupiah(i.qty*i.price)}</span></div></div>`).join('');
-            const logo = db.settings?.logo ? `<div class="t-logo"><img src="${db.settings.logo}" alt="Logo"></div>` : '';
-            const receipt = `<div class="thermal-receipt"><div class="t-logo">${logo}</div><h1>${db.settings?.name||'e-Kasir'}</h1><div class="center">${db.settings?.address||''}<br>${db.settings?.phone||''}</div><div class="line"></div><div>No. ${t.id} · ${formatDateID(t.date)} ${t.time}</div><div>Kasir: ${t.cashierName || 'Kasir'}</div><div class="line"></div>${items}<div class="line"></div><div class="row total"><span>TOTAL</span><span>${rupiah(t.total)}</span></div><div class="row"><span>Pembayaran</span><span>${t.pay}</span></div><div class="line"></div><div class="center">Terima kasih</div></div>`;
+            const t = db.transactions.find(x => String(x.id) === String(id));
+            if (!t) return toast('Transaksi tidak ditemukan.');
+
+            // Batasi pilihan pada ukuran printer thermal yang didukung.
+            width = Number(width);
+            if (![57, 80].includes(width)) width = 80;
+
+            // Hindari teks dari data toko/transaksi merusak struktur HTML cetak.
+            const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[ch]));
+            const shopName = esc(db.settings?.name || 'e-Kasir');
+            const address = esc(db.settings?.address || '');
+            const phone = esc(db.settings?.phone || '');
+            const cashier = esc(t.cashierName || 'Kasir');
+            const pay = esc(t.pay || '-');
+            const dateTime = esc(`${formatDateID(t.date)} ${t.time || ''}`);
+            const items = (Array.isArray(t.items) ? t.items : []).map(i => `
+                <div class="item">
+                    <div class="item-name">${esc(i.name || 'Item')}</div>
+                    <div class="row">
+                        <span>${esc(i.qty)} x ${esc(rupiah(i.price))}</span>
+                        <span class="amount">${esc(rupiah((Number(i.qty) || 0) * (Number(i.price) || 0)))}</span>
+                    </div>
+                </div>
+            `).join('');
+            const logo = db.settings?.logo
+                ? `<div class="logo"><img src="${esc(db.settings.logo)}" alt="Logo toko"></div>`
+                : '';
+
+            const receipt = `
+                <main class="receipt">
+                    ${logo}
+                    <h1>${shopName}</h1>
+                    ${address ? `<div class="center">${address}</div>` : ''}
+                    ${phone ? `<div class="center">${phone}</div>` : ''}
+                    <div class="line"></div>
+                    <div>No. ${esc(t.id)}</div>
+                    <div>${dateTime}</div>
+                    <div>Kasir: ${cashier}</div>
+                    <div class="line"></div>
+                    ${items || '<div>Item tidak tersedia</div>'}
+                    <div class="line"></div>
+                    <div class="row total"><strong>TOTAL</strong><strong>${esc(rupiah(t.total))}</strong></div>
+                    <div class="row"><span>Pembayaran</span><span>${pay}</span></div>
+                    ${t.pay === 'Tunai' && t.change != null ? `<div class="row"><span>Kembalian</span><span>${esc(rupiah(t.change))}</span></div>` : ''}
+                    <div class="line"></div>
+                    <div class="center thanks">Terima kasih</div>
+                </main>`;
+
             const w = window.open('', '_blank', 'width=420,height=700');
             if (!w) {
-                toast('Popup diblokir browser. Izinkan popup untuk mencetak.');
-                return
+                toast('Popup diblokir browser. Izinkan popup untuk mencetak nota thermal.');
+                return;
             }
-            w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Nota ${t.id}</title><style>@page{size:${width}mm auto;margin:2mm}html,body{margin:0;padding:0;background:#fff}body{font-family:Arial,sans-serif;color:#000}.thermal-receipt{width:${width-8}mm;margin:0 auto;font-size:${width===57?10:12}px}.t-logo{text-align:center;margin-bottom:4px}.t-logo img{max-width:${width===57?30:38}mm;max-height:18mm;object-fit:contain;filter:grayscale(1)}h1{font-size:16px;text-align:center;margin:0 0 2px}.center{text-align:center}.line{border-top:1px dashed #000;margin:6px 0}.row{display:flex;justify-content:space-between;gap:8px}.item{margin:5px 0}.item-name{font-weight:700}.total{font-size:14px;font-weight:700}</style></head><body>${receipt}</body></html>`);
+
+            w.document.open();
+            w.document.write(`<!doctype html>
+<html lang="id"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nota Thermal ${esc(t.id)}</title>
+<style>
+    @page { margin: 2mm; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #fff; color: #000; }
+    body { font-family: Arial, sans-serif; font-size: ${width === 57 ? '10px' : '12px'}; line-height: 1.35; }
+    .receipt { width: ${width - 6}mm; max-width: 100%; margin: 0 auto; overflow-wrap: anywhere; }
+    h1 { margin: 0 0 3px; text-align: center; font-size: ${width === 57 ? '14px' : '17px'}; line-height: 1.2; }
+    .center { text-align: center; }
+    .logo { text-align: center; margin: 0 0 4px; }
+    .logo img { display: inline-block; max-width: ${width === 57 ? '28mm' : '38mm'}; max-height: 16mm; object-fit: contain; }
+    .line { border-top: 1px dashed #000; margin: 5px 0; }
+    .row { display: flex; justify-content: space-between; align-items: flex-start; gap: 5px; }
+    .row > :last-child { text-align: right; }
+    .amount { white-space: nowrap; }
+    .item { margin: 4px 0; }
+    .item-name { font-weight: 700; margin-bottom: 1px; }
+    .total { font-size: ${width === 57 ? '12px' : '14px'}; }
+    .thanks { margin: 5px 0 0; }
+    @media screen { body { padding: 3mm 0; } }
+    @media print { html, body { width: 100%; margin: 0; padding: 0; } .receipt { margin: 0 auto; } }
+</style></head><body>${receipt}
+<script>
+    window.addEventListener('load', function () {
+        var imgs = Array.from(document.images);
+        Promise.all(imgs.map(function (img) {
+            if (img.complete) return Promise.resolve();
+            return new Promise(function (resolve) {
+                img.onload = resolve; img.onerror = resolve;
+            });
+        })).then(function () {
+            setTimeout(function () {
+                window.focus();
+                window.print();
+            }, 200);
+        });
+    });
+    window.addEventListener('afterprint', function () {
+        setTimeout(function () { window.close(); }, 150);
+    });
+<\/script>
+</body></html>`);
             w.document.close();
-            w.focus();
-            setTimeout(() => w.print(), 250);
             closeModal();
         }
 
