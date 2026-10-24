@@ -3017,7 +3017,7 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
             });
 
             // Sembunyikan fungsi administrasi/backup untuk Kasir.
-            const backupBtn = document.querySelector('.topbar .actions button[onclick=\\"backup()\\"]');
+            const backupBtn = Array.from(document.querySelectorAll('.topbar .actions button')).find(btn => btn.getAttribute('onclick') === 'backup()');
             if (backupBtn) backupBtn.style.display = kasir ? 'none' : '';
 
             // Kasir hanya melihat omzet dan riwayat transaksi pada halaman Laporan.
