@@ -2298,6 +2298,15 @@ body.auth-checking .auth-screen, body.auth-checking .app, body.auth-checking #pl
 .auth-loading-bar i { display:block; height:100%; width:38%; border-radius:inherit; background:#a66a37; animation:authLoadingSlide 1.2s ease-in-out infinite alternate; }
 @keyframes authLoadingSlide { from { transform:translateX(0); } to { transform:translateX(165%); } }
 
+
+/* Tampilan khusus akun Kasir: laporan hanya omzet dan riwayat transaksi. */
+body.role-kasir #laporan .report-actions { display: none !important; }
+body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none !important; }
+body.role-kasir #laporan .table th:nth-child(7),
+body.role-kasir #laporan .table td:nth-child(7),
+body.role-kasir #laporan .table th:nth-child(8),
+body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
+
 </style>
 </head>
 
@@ -2996,24 +3005,31 @@ body.auth-checking .auth-screen, body.auth-checking .app, body.auth-checking #pl
             return currentRole === 'kasir'
         }
 
-        // Hak akses menu berdasarkan role. Kasir hanya boleh melihat Dashboard, Kasir, dan Laporan.
+        // Hak akses menu berdasarkan role. Kasir dapat membuka Dashboard, Kasir, Pembelian, dan Laporan terbatas.
         function applyRoleAccess() {
             const kasir = isKasirClient();
-            const allowedKasirPages = ['dashboard', 'kasir', 'laporan'];
+            const allowedKasirPages = ['dashboard', 'kasir', 'pembelian', 'laporan'];
+            document.body.classList.toggle('role-kasir', kasir);
 
             document.querySelectorAll('.nav button').forEach(btn => {
                 const page = btn.dataset.page;
                 btn.style.display = (!kasir || allowedKasirPages.includes(page)) ? '' : 'none';
             });
 
-            // Tombol yang mengarah ke fungsi administrasi juga disembunyikan untuk Kasir.
-            const backupBtn = document.querySelector('.topbar .actions button[onclick=\"backup()\"]');
+            // Sembunyikan fungsi administrasi/backup untuk Kasir.
+            const backupBtn = document.querySelector('.topbar .actions button[onclick=\\"backup()\\"]');
             if (backupBtn) backupBtn.style.display = kasir ? 'none' : '';
+
+            // Kasir hanya melihat omzet dan riwayat transaksi pada halaman Laporan.
+            const reportTitle = document.querySelector('#laporan .section-title h2');
+            if (reportTitle) reportTitle.textContent = kasir ? 'Riwayat Transaksi & Omzet' : 'Laporan Berdasarkan Rentang Tanggal';
+            const reportSubtitle = document.querySelector('#laporan .section-title small');
+            if (reportSubtitle) reportSubtitle.textContent = kasir ? 'Pilih periode untuk melihat riwayat transaksi dan omzet.' : 'Pilih periode lalu cetak atau simpan sebagai PDF.';
         }
 
         function canAccessPage(page) {
             if (isAdminClient()) return true;
-            if (isKasirClient()) return ['dashboard', 'kasir', 'laporan'].includes(page);
+            if (isKasirClient()) return ['dashboard', 'kasir', 'pembelian', 'laporan'].includes(page);
             return false;
         }
 
@@ -3944,7 +3960,7 @@ let pendingPurchaseBahanId = null;
                 const label = status === 'lunas' ? 'Lunas' : status === 'sebagian' ? 'Belum Lunas' : 'Belum Bayar';
                 const remaining = Math.max(0, (+t.total || 0) - (+t.paidAmount || 0));
                 return `<tr><td>${t.date} ${t.time}</td><td>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</td><td>${t.pay}</td><td><span class="badge ${cls}">${label}</span></td><td>${remaining ? rupiah(remaining) : '-'}</td><td>${rupiah(t.total)}</td><td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td><td class="no-print"><button class="btn" onclick="openThermalOptions(${t.id})">🧾 Nota</button>${status !== 'lunas' ? `<button class="btn" style="margin-left:5px" onclick="openSettlePayment(${t.id})">💳 Bayar</button>` : ''}</td></tr>`;
-            }).join('') || '<tr><td colspan="9"><div class="empty">Belum ada transaksi pada periode ini.</div></td></tr>';
+            }).join('') || `<tr><td colspan="${isKasirClient() ? 7 : 9}"><div class="empty">Belum ada transaksi pada periode ini.</div></td></tr>`;
         }
 
         function updateRecipeDraft(i) {
