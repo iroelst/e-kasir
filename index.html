@@ -2685,16 +2685,16 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
                     <div class="card metric"><div><small>Total Uang Masuk</small><strong id="cashTotalIn">Rp0</strong><div class="trend" id="cashTotalInDetails">Tambahan modal · Penjualan tunai · Penjualan non-tunai</div></div><div class="icon">📥</div></div>
                     <div class="card metric"><div><small>Total Uang Keluar</small><strong id="cashTotalOut">Rp0</strong><div class="trend" id="cashTotalOutDetails">Pembelian bahan · Pengeluaran operasional</div></div><div class="icon">📤</div></div>
                 </div>
-                <div class="card no-print cash-admin-only" style="margin-top:18px">
-                    <div class="section-title"><div><h2>Pengaturan Saldo Awal</h2><small style="color:var(--muted)">Masukkan saldo tunai awal satu kali atau ubah jika diperlukan.</small></div></div>
+                <div class="card no-print" id="cashOpeningCard" style="margin-top:18px">
+                    <div class="section-title"><div><h2 id="cashOpeningTitle">Pengaturan Saldo Awal</h2><small id="cashOpeningHelp" style="color:var(--muted)">Masukkan saldo tunai awal untuk laci kasir.</small></div></div>
                     <div class="form-grid">
                         <div class="field"><label>TANGGAL SALDO AWAL</label><input id="cashOpeningDate" type="date"></div>
                         <div class="field"><label>SALDO AWAL TUNAI (RP)</label><input id="cashOpeningAmount" type="number" min="0" step="1" placeholder="Contoh: 500000"></div>
                     </div>
                     <button class="btn primary" style="margin-top:12px" onclick="saveCashOpening()">Simpan Saldo Awal</button>
                 </div>
-                <div class="card no-print cash-admin-only" style="margin-top:18px">
-                    <div class="section-title"><div><h2>Tambah Modal / Setor Kas</h2><small style="color:var(--muted)">Catat modal baru dari pemilik atau uang yang disetor keluar dari laci.</small></div></div>
+                <div class="card no-print" id="cashEntryCard" style="margin-top:18px">
+                    <div class="section-title"><div><h2 id="cashEntryTitle">Tambah Modal / Setor Kas</h2><small id="cashEntryHelp" style="color:var(--muted)">Catat modal baru atau uang yang disetor keluar dari laci kasir.</small></div></div>
                     <div class="form-grid">
                         <div class="field"><label>JENIS TRANSAKSI</label><select id="cashEntryType"><option value="modal">Tambah Modal (uang baru dari pemilik)</option><option value="setor">Setor Kas (keluar dari laci)</option></select></div>
                         <div class="field"><label>TANGGAL</label><input id="cashEntryDate" type="date"></div>
@@ -3116,6 +3116,16 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
         function applyRoleAccess() {
             const kasir = isKasirClient();
             const allowedKasirPages = ['dashboard', 'kasir', 'pembelian', 'laporan', 'keuangan'];
+            const openingTitle = document.getElementById('cashOpeningTitle');
+            const openingHelp = document.getElementById('cashOpeningHelp');
+            const entryTitle = document.getElementById('cashEntryTitle');
+            const entryHelp = document.getElementById('cashEntryHelp');
+            if (openingTitle) openingTitle.textContent = kasir ? 'Saldo Awal Kas Saya' : 'Pengaturan Saldo Awal';
+            if (openingHelp) openingHelp.textContent = kasir ? 'Masukkan saldo tunai awal untuk laci akun kasir yang sedang login.' : 'Masukkan saldo tunai awal kas usaha.';
+            if (entryTitle) entryTitle.textContent = kasir ? 'Setoran Modal Kasir' : 'Tambah Modal / Setor Kas';
+            if (entryHelp) entryHelp.textContent = kasir ? 'Catat modal tambahan untuk laci kasir atau setoran uang keluar dari laci Anda.' : 'Catat modal baru dari pemilik atau uang yang disetor keluar dari laci.';
+            const entryType = document.getElementById('cashEntryType');
+            if (entryType) entryType.options[0].textContent = kasir ? 'Tambah Modal untuk Kasir' : 'Tambah Modal (uang baru dari pemilik)';
             document.body.classList.toggle('role-kasir', kasir);
 
             document.querySelectorAll('.nav button').forEach(btn => {
@@ -4885,27 +4895,41 @@ let pendingPurchaseBahanId = null;
             if (!db.settings || typeof db.settings !== 'object') db.settings = {};
             if (!Array.isArray(db.settings.cashEntries)) db.settings.cashEntries = [];
             if (!db.settings.cashOpening || typeof db.settings.cashOpening !== 'object') db.settings.cashOpening = { date: today(), amount: 0 };
+            if (!db.settings.cashOpeningByUser || typeof db.settings.cashOpeningByUser !== 'object') db.settings.cashOpeningByUser = {};
+        }
+
+        function getCurrentCashOpening() {
+            ensureCashFinanceData();
+            if (isKasirClient() && currentUser?.uid) {
+                return db.settings.cashOpeningByUser[currentUser.uid] || { date: today(), amount: 0 };
+            }
+            return db.settings.cashOpening || { date: today(), amount: 0 };
         }
 
         function saveCashOpening() {
-            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengubah saldo awal.');
+            if (!isAdminClient() && !isKasirClient()) return toast('Akses pengaturan saldo awal tidak diizinkan.');
             ensureCashFinanceData();
             const date = document.getElementById('cashOpeningDate')?.value || today();
             const amount = Number(document.getElementById('cashOpeningAmount')?.value || 0);
             if (!date || amount < 0 || !Number.isFinite(amount)) return toast('Tanggal atau saldo awal tidak valid.');
-            db.settings.cashOpening = { date, amount };
+            const opening = { date, amount, updatedAt: new Date().toISOString() };
+            if (isKasirClient() && currentUser?.uid) {
+                db.settings.cashOpeningByUser[currentUser.uid] = { ...opening, createdByUid: currentUser.uid, createdBy: currentUserName || currentUser.email || 'Kasir' };
+            } else {
+                db.settings.cashOpening = opening;
+            }
             save(); renderAll(); toast('Saldo awal kas tunai disimpan.');
         }
 
         function saveCashEntry() {
-            if (!isAdminClient()) return toast('Hanya Admin yang dapat mencatat transaksi kas.');
+            if (!isAdminClient() && !isKasirClient()) return toast('Akses transaksi kas tidak diizinkan.');
             ensureCashFinanceData();
             const type = document.getElementById('cashEntryType')?.value || 'modal';
             const date = document.getElementById('cashEntryDate')?.value || today();
             const amount = Number(document.getElementById('cashEntryAmount')?.value || 0);
             const note = (document.getElementById('cashEntryNote')?.value || '').trim();
             if (!date || !Number.isFinite(amount) || amount <= 0) return toast('Tanggal dan nominal wajib diisi.');
-            db.settings.cashEntries.push({ id: Date.now(), type, date, amount, note, createdAt: new Date().toISOString(), createdBy: currentUserName || 'Admin' });
+            db.settings.cashEntries.push({ id: Date.now(), type, date, amount, note, createdAt: new Date().toISOString(), createdBy: currentUserName || currentUser?.email || (isKasirClient() ? 'Kasir' : 'Admin'), createdByUid: currentUser?.uid || '', cashierUid: isKasirClient() ? currentUser?.uid || '' : '' });
             save();
             document.getElementById('cashEntryAmount').value = '';
             document.getElementById('cashEntryNote').value = '';
@@ -4921,14 +4945,20 @@ let pendingPurchaseBahanId = null;
         function renderCashFinance() {
             if (!document.getElementById('cashFlowTable')) return;
             ensureCashFinanceData();
-            const opening = db.settings.cashOpening || { date: today(), amount: 0 };
+            const opening = getCurrentCashOpening();
             const openingDate = document.getElementById('cashOpeningDate');
             const openingAmount = document.getElementById('cashOpeningAmount');
             const entryDate = document.getElementById('cashEntryDate');
             const fromEl = document.getElementById('cashReportFrom');
             const toEl = document.getElementById('cashReportTo');
-            if (openingDate && !openingDate.value) openingDate.value = opening.date || today();
-            if (openingAmount && openingAmount.value === '') openingAmount.value = String(opening.amount || 0);
+            if (openingDate && (!openingDate.value || openingDate.dataset.ownerUid !== (isKasirClient() ? currentUser?.uid || '' : 'admin'))) {
+                openingDate.value = opening.date || today();
+                openingDate.dataset.ownerUid = isKasirClient() ? currentUser?.uid || '' : 'admin';
+            }
+            if (openingAmount && (!openingAmount.dataset.loadedFor || openingAmount.dataset.loadedFor !== (isKasirClient() ? currentUser?.uid || '' : 'admin'))) {
+                openingAmount.value = String(opening.amount || 0);
+                openingAmount.dataset.loadedFor = isKasirClient() ? currentUser?.uid || '' : 'admin';
+            }
             if (entryDate && !entryDate.value) entryDate.value = today();
             const dr = defaultRange();
             if (fromEl && !fromEl.value) fromEl.value = dr.from;
@@ -4949,23 +4979,22 @@ let pendingPurchaseBahanId = null;
             dailySales.forEach((v, date) => rows.push({ date, type: 'Penjualan harian', note: `Tunai ${rupiah(v.cash)} · Non-tunai ${rupiah(v.noncash)}`, masuk: v.total, keluar: 0, order: 1 }));
             (db.purchases || []).filter(x => recordBelongsToCurrentUser(x, 'purchase') && x.date >= from && x.date <= to).forEach(x => rows.push({ date: x.date, type: 'Pembelian bahan', note: `${x.bahanName || 'Pembelian'}${x.note ? ' — ' + x.note : ''}`, masuk: 0, keluar: Number(x.total) || 0, order: 2 }));
             (db.expenses || []).filter(x => recordBelongsToCurrentUser(x, 'expense') && x.date >= from && x.date <= to).forEach(x => rows.push({ date: x.date, type: 'Pengeluaran', note: `${x.cat || 'Operasional'}${x.note ? ' — ' + x.note : ''}`, masuk: 0, keluar: Number(x.amount) || 0, order: 3 }));
-            (cashierView ? [] : (db.settings.cashEntries || [])).filter(x => x.date >= from && x.date <= to).forEach(x => {
+            (db.settings.cashEntries || []).filter(x => recordBelongsToCurrentUser(x, 'cashEntry') && x.date >= from && x.date <= to).forEach(x => {
                 const inCash = x.type === 'modal' || x.type === 'tarik';
                 const labels = { modal: 'Tambah modal', setor: 'Setor kas (keluar laci)', tarik: 'Transaksi kas lama' };
-                rows.push({ date: x.date, type: labels[x.type] || 'Transaksi kas', note: x.note || '-', masuk: inCash ? Number(x.amount) || 0 : 0, keluar: inCash ? 0 : Number(x.amount) || 0, order: 0 });
+                rows.push({ date: x.date, type: labels[x.type] || 'Transaksi kas', note: `${x.note || '-'}${x.createdBy ? ' · ' + x.createdBy : ''}`, masuk: inCash ? Number(x.amount) || 0 : 0, keluar: inCash ? 0 : Number(x.amount) || 0, order: 0 });
             });
-            if (!cashierView && opening.date >= from && opening.date <= to && Number(opening.amount) > 0) rows.push({ date: opening.date, type: 'Saldo awal', note: 'Saldo awal kas tunai', masuk: Number(opening.amount) || 0, keluar: 0, order: -1 });
+            if (opening.date >= from && opening.date <= to && Number(opening.amount) > 0) rows.push({ date: opening.date, type: 'Saldo awal', note: cashierView ? 'Saldo awal kasir' : 'Saldo awal kas tunai', masuk: Number(opening.amount) || 0, keluar: 0, order: -1 });
             rows.sort((a,b) => a.date.localeCompare(b.date) || a.order-b.order || a.type.localeCompare(b.type));
             const masuk = rows.reduce((a,x)=>a+x.masuk,0), keluar = rows.reduce((a,x)=>a+x.keluar,0);
-            const todaySales = (dailySales.get(today()) || { total: 0 }).total;
-            const cashSales = (db.transactions || []).filter(t => recordBelongsToCurrentUser(t, 'transaction') && t.date >= (cashierView ? '0000-00-00' : (opening.date || '0000-00-00')) && t.date <= today() && String(t.pay || '').toLowerCase().includes('tunai')).reduce((a,t)=>a+Math.max(0, Number(t.paidAmount ?? (t.status === 'lunas' ? t.total : 0)) || 0),0);
-            const cashEntries = (cashierView ? [] : (db.settings.cashEntries || [])).filter(x => x.date >= (opening.date || '0000-00-00') && x.date <= today());
+            const cashEntries = (db.settings.cashEntries || []).filter(x => recordBelongsToCurrentUser(x, 'cashEntry') && x.date >= (opening.date || '0000-00-00') && x.date <= today());
             const capitalTotal = cashEntries.filter(x=>x.type==='modal').reduce((a,x)=>a+(Number(x.amount)||0),0);
             const transfers = cashEntries.reduce((a,x)=>a+(x.type==='setor'?-(Number(x.amount)||0):0),0);
-            // Semua pembelian bahan dan pengeluaran dianggap dibayar tunai.
-            const cashPurchases = (db.purchases || []).filter(x => recordBelongsToCurrentUser(x, 'purchase') && x.date >= (cashierView ? '0000-00-00' : (opening.date || '0000-00-00')) && x.date <= today()).reduce((a,x)=>a+(Number(x.total)||0),0);
-            const cashExpenses = (db.expenses || []).filter(x => recordBelongsToCurrentUser(x, 'expense') && x.date >= (cashierView ? '0000-00-00' : (opening.date || '0000-00-00')) && x.date <= today()).reduce((a,x)=>a+(Number(x.amount)||0),0);
-            const cashBalance = (cashierView ? 0 : (Number(opening.amount)||0)) + cashSales + (cashierView ? 0 : capitalTotal + transfers) - cashPurchases - cashExpenses;
+            const cashSales = (db.transactions || []).filter(t => recordBelongsToCurrentUser(t, 'transaction') && t.date >= (opening.date || '0000-00-00') && t.date <= today() && String(t.pay || '').toLowerCase().includes('tunai')).reduce((a,t)=>a+Math.max(0, Number(t.paidAmount ?? (t.status === 'lunas' ? t.total : 0)) || 0),0);
+            // Pembelian dan pengeluaran dianggap dibayar tunai, sesuai logika aplikasi saat ini.
+            const cashPurchases = (db.purchases || []).filter(x => recordBelongsToCurrentUser(x, 'purchase') && x.date >= (opening.date || '0000-00-00') && x.date <= today()).reduce((a,x)=>a+(Number(x.total)||0),0);
+            const cashExpenses = (db.expenses || []).filter(x => recordBelongsToCurrentUser(x, 'expense') && x.date >= (opening.date || '0000-00-00') && x.date <= today()).reduce((a,x)=>a+(Number(x.amount)||0),0);
+            const cashBalance = (Number(opening.amount)||0) + cashSales + capitalTotal + transfers - cashPurchases - cashExpenses;
             const el = id => document.getElementById(id);
             if (el('cashBalance')) el('cashBalance').textContent = rupiah(cashBalance);
             const periodCapital = rows.filter(x => x.type === 'Tambah modal').reduce((a,x)=>a+x.masuk,0);
@@ -4973,10 +5002,10 @@ let pendingPurchaseBahanId = null;
             const periodNoncashSales = [...dailySales.values()].reduce((a,x)=>a+x.noncash,0);
             const periodPurchases = rows.filter(x => x.type === 'Pembelian bahan').reduce((a,x)=>a+x.keluar,0);
             const periodExpenses = rows.filter(x => x.type === 'Pengeluaran').reduce((a,x)=>a+x.keluar,0);
-            if (el('cashTotalIn')) el('cashTotalIn').textContent = rupiah(periodCapital + periodCashSales + periodNoncashSales);
-            if (el('cashTotalInDetails')) el('cashTotalInDetails').textContent = `Tambahan modal ${rupiah(periodCapital)} · Penjualan tunai ${rupiah(periodCashSales)} · Non-tunai ${rupiah(periodNoncashSales)}`;
-            if (el('cashTotalOut')) el('cashTotalOut').textContent = rupiah(periodPurchases + periodExpenses);
-            if (el('cashTotalOutDetails')) el('cashTotalOutDetails').textContent = `Pembelian bahan ${rupiah(periodPurchases)} · Pengeluaran operasional ${rupiah(periodExpenses)}`;
+            if (el('cashTotalIn')) el('cashTotalIn').textContent = rupiah(periodCapital + periodCashSales + periodNoncashSales + (opening.date >= from && opening.date <= to ? Number(opening.amount)||0 : 0));
+            if (el('cashTotalInDetails')) el('cashTotalInDetails').textContent = `Saldo awal ${rupiah(opening.date >= from && opening.date <= to ? Number(opening.amount)||0 : 0)} · Tambahan modal ${rupiah(periodCapital)} · Penjualan tunai ${rupiah(periodCashSales)} · Non-tunai ${rupiah(periodNoncashSales)}`;
+            if (el('cashTotalOut')) el('cashTotalOut').textContent = rupiah(periodPurchases + periodExpenses + rows.filter(x => x.type === 'Setor kas (keluar laci)').reduce((a,x)=>a+x.keluar,0));
+            if (el('cashTotalOutDetails')) el('cashTotalOutDetails').textContent = `Setor kas ${rupiah(rows.filter(x => x.type === 'Setor kas (keluar laci)').reduce((a,x)=>a+x.keluar,0))} · Pembelian bahan ${rupiah(periodPurchases)} · Pengeluaran operasional ${rupiah(periodExpenses)}`;
             if (el('cashFlowSummary')) el('cashFlowSummary').innerHTML = '';
             if (el('cashFlowTable')) el('cashFlowTable').innerHTML = rows.map(x=>`<tr><td>${formatDateID(x.date)}</td><td>${x.type}</td><td>${x.note}</td><td>${x.masuk ? rupiah(x.masuk) : '-'}</td><td>${x.keluar ? rupiah(x.keluar) : '-'}</td></tr>`).join('') || '<tr><td colspan="5"><div class="empty">Belum ada arus kas pada periode ini.</div></td></tr>';
         }
