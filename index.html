@@ -3544,7 +3544,14 @@ let pendingPurchaseBahanId = null;
         }).format(n || 0);
         const formatQty = n => Number.isInteger(+n) ? String(+n) : String(Number(+n).toFixed(2)).replace(/\.?0+$/, '');
 
-        const today = () => new Date().toISOString().slice(0, 10);
+        // Gunakan tanggal lokal perangkat agar sesuai hari di Indonesia (WIB), bukan tanggal UTC.
+        const today = () => {
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        };
+        // Tanggal transaksi otomatis terisi hari ini saat aplikasi dibuka.
+        const posDateInput = document.getElementById('posTransactionDate');
+        if (posDateInput && !posDateInput.value) posDateInput.value = today();
 
         function toast(s) {
             let e = document.getElementById('toast');
