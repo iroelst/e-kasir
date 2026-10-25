@@ -5219,14 +5219,24 @@ let pendingPurchaseBahanId = null;
             if (opening.date >= from && opening.date <= to && Number(opening.amount) > 0) rows.push({ date: opening.date, cashierName: cashierView ? (currentUserName || 'Kasir') : 'Admin', type: 'Saldo awal', note: cashierView ? 'Saldo awal kasir' : 'Saldo awal kas tunai', masuk: Number(opening.amount) || 0, keluar: 0, order: -1 });
             rows.sort((a,b) => a.date.localeCompare(b.date) || a.order-b.order || a.type.localeCompare(b.type));
             const masuk = rows.reduce((a,x)=>a+x.masuk,0), keluar = rows.reduce((a,x)=>a+x.keluar,0);
-            const cashEntries = (db.settings.cashEntries || []).filter(x => recordBelongsToCurrentUser(x, 'cashEntry') && x.date >= (opening.date || '0000-00-00') && x.date <= today());
+            // Saldo laci: bila saldo awal diisi positif, gunakan tanggal saldo awal sebagai titik mulai.
+            // Bila saldo awal masih 0 (belum pernah diisi), hitung riwayat transaksi yang tersedia
+            // agar penjualan hari sebelumnya tidak membuat saldo laci tampil Rp0.
+            const datedMovements = []
+                .concat((db.transactions || []).filter(t => recordBelongsToCurrentUser(t, 'transaction') && t.date && t.date <= today()).map(t => t.date))
+                .concat((db.purchases || []).filter(x => recordBelongsToCurrentUser(x, 'purchase') && x.date && x.date <= today()).map(x => x.date))
+                .concat((db.expenses || []).filter(x => recordBelongsToCurrentUser(x, 'expense') && x.date && x.date <= today()).map(x => x.date))
+                .concat((db.settings.cashEntries || []).filter(x => recordBelongsToCurrentUser(x, 'cashEntry') && x.date && x.date <= today()).map(x => x.date));
+            const openingCashValue = Number(opening.amount) || 0;
+            const cashStartDate = openingCashValue > 0 ? (opening.date || '0000-00-00') : (datedMovements.length ? datedMovements.sort()[0] : (opening.date || today()));
+            const cashEntries = (db.settings.cashEntries || []).filter(x => recordBelongsToCurrentUser(x, 'cashEntry') && x.date >= cashStartDate && x.date <= today());
             const capitalTotal = cashEntries.filter(x=>x.type==='modal').reduce((a,x)=>a+(Number(x.amount)||0),0);
             const transfers = cashEntries.reduce((a,x)=>a+(x.type==='setor'?-(Number(x.amount)||0):0),0);
-            const cashSales = (db.transactions || []).filter(t => recordBelongsToCurrentUser(t, 'transaction') && t.date >= (opening.date || '0000-00-00') && t.date <= today() && String(t.pay || '').toLowerCase().includes('tunai')).reduce((a,t)=>a+Math.max(0, Number(t.paidAmount ?? (t.status === 'lunas' ? t.total : 0)) || 0),0);
-            // Pembelian dan pengeluaran dianggap dibayar tunai, sesuai logika aplikasi saat ini.
-            const cashPurchases = (db.purchases || []).filter(x => recordBelongsToCurrentUser(x, 'purchase') && x.date >= (opening.date || '0000-00-00') && x.date <= today()).reduce((a,x)=>a+(Number(x.total)||0),0);
-            const cashExpenses = (db.expenses || []).filter(x => recordBelongsToCurrentUser(x, 'expense') && x.date >= (opening.date || '0000-00-00') && x.date <= today()).reduce((a,x)=>a+(Number(x.amount)||0),0);
-            const cashBalance = (Number(opening.amount)||0) + cashSales + capitalTotal + transfers - cashPurchases - cashExpenses;
+            const cashSales = (db.transactions || []).filter(t => recordBelongsToCurrentUser(t, 'transaction') && t.date >= cashStartDate && t.date <= today() && String(t.pay || '').toLowerCase().includes('tunai')).reduce((a,t)=>a+Math.max(0, Number(t.paidAmount ?? (t.status === 'lunas' ? t.total : 0)) || 0),0);
+            // Sesuai perilaku aplikasi saat ini, pembelian dan pengeluaran dihitung sebagai uang tunai keluar.
+            const cashPurchases = (db.purchases || []).filter(x => recordBelongsToCurrentUser(x, 'purchase') && x.date >= cashStartDate && x.date <= today()).reduce((a,x)=>a+(Number(x.total)||0),0);
+            const cashExpenses = (db.expenses || []).filter(x => recordBelongsToCurrentUser(x, 'expense') && x.date >= cashStartDate && x.date <= today()).reduce((a,x)=>a+(Number(x.amount)||0),0);
+            const cashBalance = openingCashValue + cashSales + capitalTotal + transfers - cashPurchases - cashExpenses;
             const el = id => document.getElementById(id);
             if (el('cashBalance')) el('cashBalance').textContent = rupiah(cashBalance);
             const periodCapital = rows.filter(x => x.type === 'Tambah modal').reduce((a,x)=>a+x.masuk,0);
