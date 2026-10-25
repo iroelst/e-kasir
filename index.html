@@ -4208,7 +4208,7 @@ let pendingPurchaseBahanId = null;
             stockUsageTotal.textContent = rupiah(usageTotal);
             stockEndingTotal.textContent = rupiah(endingTotal);
             stockPeriodStatus.textContent = `Periode ${r.from.split('-').reverse().join('/')} – ${r.to.split('-').reverse().join('/')} · Stok akhir dihitung otomatis`;
-            purchaseTable.innerHTML = stockPurchases(r.from, r.to).slice().reverse().map(m => {
+            purchaseTable.innerHTML = stockPurchases(r.from, r.to).filter(m => isAdminClient() || recordBelongsToCurrentUser(m, 'purchase')).slice().reverse().map(m => {
                 const controls = canManagePurchaseRecord(m)
                     ? `<div style="display:flex;gap:6px"><button class="btn" title="Edit pembelian" onclick="openPurchaseModal(${m.id})">✏️ Edit</button><button class="btn" title="Hapus pembelian" onclick="deletePurchase(${m.id})">🗑️ Hapus</button></div>`
                     : '—';
