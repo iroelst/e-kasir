@@ -5510,7 +5510,7 @@ let pendingPurchaseBahanId = null;
             if (!isAdminClient()) return toast('Hanya Admin yang dapat mengubah user.');
             if (!confirm((currentlyActive ? 'Nonaktifkan' : 'Aktifkan') + ' akun Kasir ini?')) return;
             try {
-                await fbFs.doc('users/' + uid).set({ disabled: !currentlyActive }, { merge: true });
+                await fbFs.doc('users/' + uid).set({ disabled: currentlyActive, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
                 await renderKasirUsers();
                 toast(currentlyActive ? 'Akun Kasir dinonaktifkan.' : 'Akun Kasir diaktifkan.');
             } catch (e) {
