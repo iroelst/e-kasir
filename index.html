@@ -2873,7 +2873,13 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
             currentUserName = '',
             KEY = BASE_KEY,
             db = {};
+        // Salinan bersama khusus perhitungan stok; laporan kasir tetap memakai data miliknya.
+        let sharedStockTransactions = [];
+        let sharedStockPurchases = [];
         let firebaseReady = false;
+        // Sesi lokal hanya untuk membuka data perangkat ketika Firebase Auth tidak tersedia.
+        // Tidak boleh melakukan penulisan cloud sampai Firebase mengonfirmasi user asli.
+        let offlineLocalSession = false;
         let firebaseAdminApp = null;
         let firebaseAdminAuth = null;
 
@@ -3041,23 +3047,39 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
             }
         }
         async function finishFirebaseLogin(user) {
+            offlineLocalSession = false;
             currentUser = user;
             currentUserName = user.displayName || (user.email ? user.email.split('@')[0] : '') || 'User';
             KEY = BASE_KEY + '_' + user.uid;
             try {
-                const p = await fbFs.doc('users/' + user.uid).get();
                 const isPlatformOwner = user.uid === PLATFORM_OWNER_UID;
                 const isLegacyTest = user.uid === LEGACY_TEST_UID;
-                let profile = p.exists ? (p.data() || {}) : {};
+                let profile = {};
+                let profileLoadedFromCloud = false;
+                try {
+                    const p = await fbFs.doc('users/' + user.uid).get();
+                    profile = p.exists ? (p.data() || {}) : {};
+                    profileLoadedFromCloud = true;
+                } catch (profileError) {
+                    // Saat offline, gunakan profil terakhir yang berhasil diverifikasi saat online.
+                    const cachedProfile = JSON.parse(localStorage.getItem('ekasir_profile_cache_' + user.uid) || 'null');
+                    const networkUnavailable = !navigator.onLine || ['unavailable', 'deadline-exceeded'].includes(profileError?.code);
+                    if (networkUnavailable && cachedProfile && cachedProfile.uid === user.uid) {
+                        profile = cachedProfile;
+                        console.warn('Mode offline: memakai profil akun tersimpan di perangkat.');
+                    } else {
+                        throw profileError;
+                    }
+                }
 
                 // Pemilik platform dan akun uji lama dipertahankan.
                 // Persetujuan Super Admin hanya diwajibkan untuk Admin Warung,
                 // bukan kasir yang dibuat oleh Admin Warung.
-                if (!isPlatformOwner && !isLegacyTest && !p.exists) {
+                if (!isPlatformOwner && !isLegacyTest && profileLoadedFromCloud && !Object.keys(profile).length) {
                     throw new Error('Profil akun belum tersedia. Hubungi Admin.');
                 }
-                if (isLegacyTest && !p.exists) profile = { role: 'admin', shopId: 'utama', name: currentUserName };
-                if (isPlatformOwner && !p.exists) profile = { role: 'admin', shopId: 'utama', name: currentUserName, approved: true };
+                if (isLegacyTest && !profileLoadedFromCloud && !Object.keys(profile).length) profile = { role: 'admin', shopId: 'utama', name: currentUserName };
+                if (isPlatformOwner && !profileLoadedFromCloud && !Object.keys(profile).length) profile = { role: 'admin', shopId: 'utama', name: currentUserName, approved: true };
 
                 currentRole = (isPlatformOwner || isLegacyTest) ? 'admin' : String(profile.role || '').toLowerCase();
                 if (!['admin', 'kasir'].includes(currentRole)) throw new Error('Role akun belum diatur. Hubungi Admin.');
@@ -3070,6 +3092,15 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
                 SHOP_ID = (isPlatformOwner || isLegacyTest) ? 'utama' : String(profile.shopId || '');
                 if (!SHOP_ID) throw new Error('ID warung belum diatur pada profil akun. Hubungi Admin.');
                 currentUserName = String(profile.name || profile.displayName || currentUserName || 'User').trim() || 'User';
+                if (profileLoadedFromCloud) {
+                    try {
+                        localStorage.setItem('ekasir_profile_cache_' + user.uid, JSON.stringify({
+                            uid: user.uid, role: currentRole, shopId: SHOP_ID,
+                            name: currentUserName, approved: profile.approved === true,
+                            disabled: profile.disabled === true, cachedAt: Date.now()
+                        }));
+                    } catch (_) {}
+                }
             } catch (e) {
                 console.error('load user profile:', e);
                 currentUser = null;
@@ -3098,7 +3129,16 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
             applyRoleAccess();
             ensureAdminUserManagement();
             renderAll();
-            await loadFirebaseData();
+            if (!navigator.onLine) setCloudStatus('Offline — data lokal');
+            if (navigator.onLine && localStorage.getItem('ekasir_pending_sync_' + currentUser.uid) === '1') {
+                await syncFirebase(true); // Kirim antrean lokal lebih dulu agar tidak tertimpa data cloud.
+            }
+            // Jika sinkronisasi masih gagal, pertahankan salinan lokal dan antreannya.
+            if (localStorage.getItem('ekasir_pending_sync_' + currentUser.uid) !== '1') {
+                await loadFirebaseData();
+            } else {
+                setCloudStatus(navigator.onLine ? 'Menunggu sinkronisasi' : 'Offline — data lokal');
+            }
             applyRoleAccess();
             ensureAdminUserManagement();
             renderAll();
@@ -3179,9 +3219,17 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
         }
         async function loadFirebaseData() {
             if (!currentUser || !firebaseReady) return;
+            if (!navigator.onLine) {
+                setCloudStatus('Offline — data lokal');
+                return; // Jangan timpa data lokal dengan hasil baca yang gagal saat offline.
+            }
             setCloudStatus('Menghubungkan...');
             try {
-                const [menus, bahan, recipes, transactions, purchases, expenses, stockMoves, stockPeriods, settings] = await Promise.all([readCollection('menus'), readCollection('bahan'), readCollection('recipes'), readOwnedCollection('transactions', 'cashierUid'), readOwnedCollection('purchases', 'createdByUid'), readOwnedCollection('expenses', 'createdByUid'), isAdminClient() ? readCollection('stock') : Promise.resolve([]), isAdminClient() ? readCollection('stockPeriods') : Promise.resolve([]), isAdminClient() ? fbFs.doc('toko/' + SHOP_ID + '/settings/profile').get() : Promise.resolve({ exists: false })]);
+                // Stok adalah milik bersama: baca transaksi/pembelian toko untuk kalkulasi stok,
+                // tetapi simpan data laporan kasir dalam array terpisah yang tetap terfilter.
+                const [menus, bahan, recipes, transactions, purchases, expenses, stockMoves, stockPeriods, settings, allStockTransactions, allStockPurchases] = await Promise.all([readCollection('menus'), readCollection('bahan'), readCollection('recipes'), readOwnedCollection('transactions', 'cashierUid'), readOwnedCollection('purchases', 'createdByUid'), readOwnedCollection('expenses', 'createdByUid'), isAdminClient() ? readCollection('stock') : Promise.resolve([]), readCollection('stockPeriods'), isAdminClient() ? fbFs.doc('toko/' + SHOP_ID + '/settings/profile').get() : Promise.resolve({ exists: false }), readCollection('transactions'), readCollection('purchases')]);
+                sharedStockTransactions = allStockTransactions.map(x => { delete x.__docId; return x; });
+                sharedStockPurchases = allStockPurchases.map(x => { delete x.__docId; return x; });
                 db.menus = menus.map(x => {
                     delete x.__docId;
                     return x
@@ -3263,8 +3311,10 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
         }
 
         async function writeArray(name, arr, allowDelete = false) {
-            const ref = colRef(name),
-                existing = await ref.get();
+            const ref = colRef(name);
+            // Kasir hanya perlu menulis dokumen miliknya; jangan membaca seluruh koleksi.
+            // Pembacaan koleksi dapat ditolak oleh Firestore Rules untuk akun kasir.
+            const existing = allowDelete ? await ref.get() : null;
             const wanted = new Set();
             for (const item of arr) {
                 // Resep tidak mempunyai field id tersendiri. Gunakan menuId
@@ -3282,20 +3332,27 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
                     merge: true
                 })
             }
-            if (allowDelete) {
+            if (allowDelete && existing) {
                 for (const d of existing.docs)
                     if (!wanted.has(d.id)) await d.ref.delete()
             }
         }
         async function syncFirebase(force = false) {
-            if (!currentUser || !firebaseReady) return;
+            // Jangan mengirim data memakai identitas sesi lokal yang belum diverifikasi Firebase.
+            if (offlineLocalSession || !currentUser || !firebaseReady || !fbAuth?.currentUser || fbAuth.currentUser.uid !== currentUser.uid) return;
+            if (!navigator.onLine) {
+                setCloudStatus('Offline — menunggu sinkronisasi');
+                return;
+            }
             if (force) setCloudStatus('Menyinkronkan...');
             try {
                 if (isAdminClient()) {
-                    await Promise.all([writeArray('menus', db.menus, true), writeArray('bahan', db.bahan, true), writeArray('recipes', db.recipes, true), writeArray('transactions', db.transactions, true), writeArray('purchases', db.purchases, true), writeArray('expenses', db.expenses, true), writeArray('stock', db.stockMoves, true), writeArray('stockPeriods', Object.entries(db.stockPeriods).map(([id, v]) => ({
+                    // Sinkronisasi rutin bersifat merge-only; tidak menghapus dokumen cloud
+                    // berdasarkan salinan lokal yang mungkin belum lengkap.
+                    await Promise.all([writeArray('menus', db.menus, false), writeArray('bahan', db.bahan, false), writeArray('recipes', db.recipes, false), writeArray('transactions', db.transactions, false), writeArray('purchases', db.purchases, false), writeArray('expenses', db.expenses, false), writeArray('stock', db.stockMoves, false), writeArray('stockPeriods', Object.entries(db.stockPeriods).map(([id, v]) => ({
                         id,
                         ...v
-                    })), true)]);
+                    })), false)]);
                     await fbFs.doc('toko/' + SHOP_ID + '/settings/profile').set(db.settings, {
                         merge: true
                     })
@@ -3303,17 +3360,22 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
                     await Promise.all([writeArray('transactions', db.transactions, false), writeArray('purchases', db.purchases, false), writeArray('expenses', db.expenses, false)])
                 }
                 localStorage.setItem(KEY, JSON.stringify(db));
+                try { localStorage.removeItem('ekasir_pending_sync_' + currentUser.uid); } catch (_) {}
                 setCloudStatus('Tersinkron', true)
             } catch (e) {
                 console.error(e);
-                setCloudStatus('Sinkron gagal');
-                toast('Sinkronisasi Firebase gagal: ' + (e.message || ''))
+                setCloudStatus(navigator.onLine ? 'Sinkron gagal' : 'Offline — menunggu sinkronisasi');
+                if (navigator.onLine) toast('Sinkronisasi Firebase gagal: ' + (e.message || ''));
             }
         }
         let syncTimer = null;
 
         function queueCloudSync() {
             if (!currentUser) return;
+            if (!navigator.onLine) {
+                setCloudStatus('Offline — menunggu sinkronisasi');
+                return;
+            }
             clearTimeout(syncTimer);
             syncTimer = setTimeout(() => syncFirebase(false), 500)
         }
@@ -3321,8 +3383,41 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
         function save() {
             normalizeDb();
             localStorage.setItem(KEY, JSON.stringify(db));
+            if (currentUser?.uid) {
+                try { localStorage.setItem('ekasir_pending_sync_' + currentUser.uid, '1'); } catch (_) {}
+            }
             queueCloudSync()
         }
+
+        // Saat offline, transaksi tetap tersimpan di localStorage. Ketika internet
+        // kembali, kirim data lokal terlebih dahulu baru muat ulang data cloud.
+        window.addEventListener('offline', () => {
+            setCloudStatus('Offline — data tersimpan di perangkat');
+        });
+        window.addEventListener('online', async () => {
+            if (!firebaseReady) return;
+            // Jika sedang dalam sesi lokal, lanjutkan sinkronisasi hanya setelah Firebase
+            // memulihkan user asli; jika belum ada, jangan kirim data dengan sesi palsu.
+            if (offlineLocalSession) {
+                const authenticatedUser = fbAuth?.currentUser;
+                if (authenticatedUser) {
+                    await finishFirebaseLogin(authenticatedUser);
+                } else {
+                    setCloudStatus('Internet kembali — login diperlukan untuk sinkronisasi');
+                    showAuthMessage('Data lokal tetap aman. Login kembali saat internet aktif untuk menyinkronkan data.');
+                    return;
+                }
+            }
+            if (!currentUser) return;
+            setCloudStatus('Internet kembali — menyinkronkan...');
+            await syncFirebase(true);
+            if (localStorage.getItem('ekasir_pending_sync_' + currentUser.uid) !== '1') {
+                await loadFirebaseData();
+            } else {
+                setCloudStatus('Sinkronisasi tertunda — data lokal aman');
+            }
+            renderAll();
+        });
 
         function renderUserChip() {
             const el = document.getElementById('userChip');
@@ -3331,7 +3426,11 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
             const label = role === 'admin' ? 'Admin' : (role === 'kasir' ? 'Kasir' : 'User');
             el.innerHTML = currentUser ? '<div class="user-avatar">👤</div><div class="user-role-label">' + label + '</div>' : '';
         }
+        function showToastOfflineNotice() {
+            try { toast('Mode offline: data tersimpan di HP. Login online diperlukan untuk sinkronisasi.'); } catch (_) {}
+        }
         async function logout() {
+            offlineLocalSession = false;
             try {
                 if (window.fbAuth) await fbAuth.signOut()
             } catch (e) {}
@@ -3360,9 +3459,49 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
             fbAuth.onAuthStateChanged(async user => {
                 if (registrationInProgress) return;
                 if (!user) {
+                    // Pulihkan mode lokal hanya jika perangkat sebelumnya berhasil login,
+                    // internet sedang tidak tersedia, dan profil cache cocok dengan UID.
+                    // Ini tidak membuat sesi Firebase baru dan tidak mengizinkan sinkronisasi cloud.
+                    if (!navigator.onLine) {
+                        try {
+                            const savedSession = JSON.parse(localStorage.getItem(AUTH_KEY) || 'null');
+                            const cachedProfile = savedSession?.uid
+                                ? JSON.parse(localStorage.getItem('ekasir_profile_cache_' + savedSession.uid) || 'null')
+                                : null;
+                            const cachedDb = savedSession?.uid
+                                ? localStorage.getItem(BASE_KEY + '_' + savedSession.uid)
+                                : null;
+                            if (savedSession?.uid && cachedProfile?.uid === savedSession.uid && cachedProfile.shopId && cachedProfile.role && cachedDb) {
+                                offlineLocalSession = true;
+                                currentUser = { uid: savedSession.uid, email: savedSession.email || '', displayName: cachedProfile.name || '' };
+                                currentRole = String(cachedProfile.role).toLowerCase();
+                                currentUserName = cachedProfile.name || currentUser.email.split('@')[0] || 'User';
+                                SHOP_ID = String(cachedProfile.shopId);
+                                KEY = BASE_KEY + '_' + savedSession.uid;
+                                db = JSON.parse(cachedDb) || blankDb();
+                                normalizeDb();
+                                document.getElementById('platformOwnerScreen').style.display = 'none';
+                                document.querySelector('.app').style.display = '';
+                                document.getElementById('authScreen').style.display = 'none';
+                                renderUserChip();
+                                applyRoleAccess();
+                                ensureAdminUserManagement();
+                                renderAll();
+                                setCloudStatus('Offline — data lokal');
+                                showToastOfflineNotice();
+                            } else {
+                                document.getElementById('authScreen').style.display = 'grid';
+                                showAuthMessage('Login pertama kali perlu internet. Setelah login online, aplikasi dapat dibuka offline pada perangkat ini.');
+                            }
+                        } catch (offlineError) {
+                            console.warn('Tidak dapat memulihkan sesi lokal:', offlineError);
+                            document.getElementById('authScreen').style.display = 'grid';
+                        }
+                    } else {
+                        document.getElementById('authScreen').style.display = 'grid';
+                    }
                     document.body.classList.remove('auth-checking');
-                    document.getElementById('authScreen').style.display = 'grid';
-                    return
+                    return;
                 }
                 try {
                     await finishFirebaseLogin(user)
@@ -3438,6 +3577,34 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
             return db.purchases.filter(m => m.type === 'purchase' && inRange(m.date, from, to) && recordBelongsToCurrentUser(m, 'purchase'))
         }
 
+        // Stok bahan adalah stok bersama: semua kasir memakai penjualan dan pembelian
+        // yang sama, tanpa mengubah pembatasan akses pada laporan/kelola transaksi.
+        function stockTransactions(from, to) {
+            // Gabungkan data bersama dari cloud dengan transaksi lokal terbaru yang belum tersinkron.
+            const byId = new Map();
+            [...(sharedStockTransactions || []), ...(db.transactions || [])].forEach(t => {
+                const key = String(t.id ?? (t.cashierUid + '_' + t.date + '_' + t.time));
+                byId.set(key, t);
+            });
+            return [...byId.values()].filter(t => inRange(t.date, from, to));
+        }
+
+        function stockPurchases(from, to) {
+            const byId = new Map();
+            [...(sharedStockPurchases || []), ...(db.purchases || [])].forEach(p => {
+                const key = String(p.id ?? (p.createdByUid + '_' + p.date + '_' + p.bahanId));
+                byId.set(key, p);
+            });
+            return [...byId.values()].filter(m => m.type === 'purchase' && inRange(m.date, from, to));
+        }
+
+        function canManagePurchaseRecord(record) {
+            if (isAdminClient()) return true;
+            if (!isKasirClient() || !currentUser?.uid || !record) return false;
+            const uid = record.createdByUid || record.cashierUid || '';
+            return String(uid) === String(currentUser.uid);
+        }
+
         function recipeItemParts(item) {
             if (Array.isArray(item)) return {
                 name: item[0],
@@ -3452,7 +3619,7 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
 
         function usageForRange(b, from, to) {
             let used = 0;
-            rangeTransactions(from, to).forEach(t => (t.items || []).forEach(it => {
+            stockTransactions(from, to).forEach(t => (t.items || []).forEach(it => {
                 let r = db.recipes.find(x => x.menuId === it.id);
                 if (r) r.items.forEach(item => {
                     const z = recipeItemParts(item);
@@ -3466,7 +3633,7 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
             const key = rangeKey(from, to),
                 p = ensurePeriod(key, from, to),
                 opening = +(p.opening[b.id] ?? 0),
-                purchases = rangePurchases(from, to).filter(x => x.bahanId === b.id).reduce((a, x) => a + (+x.qty || 0), 0),
+                purchases = stockPurchases(from, to).filter(x => x.bahanId === b.id).reduce((a, x) => a + (+x.qty || 0), 0),
                 used = usageForRange(b, from, to),
                 ending = opening + purchases - used;
             p.ending[b.id] = ending;
@@ -3733,7 +3900,14 @@ let pendingPurchaseBahanId = null;
             const transactionDate = dateInput?.value || today();
             if (transactionDate > today()) return toast('Tanggal transaksi tidak boleh melebihi hari ini');
 
-            const rr = defaultRange(), need = {};
+            // Sinkronkan ulang saldo periode dengan seluruh aktivitas semua kasir.
+            recalculateStockPeriods();
+            const selectedRange = getRange();
+            const defaultStockRange = defaultRange();
+            const rr = transactionDate >= selectedRange.from && transactionDate <= selectedRange.to
+                ? selectedRange
+                : defaultStockRange;
+            const need = {};
             cart.forEach(it => {
                 const r = db.recipes.find(x => x.menuId === it.id);
                 if (r) r.items.forEach(item => {
@@ -3881,6 +4055,7 @@ let pendingPurchaseBahanId = null;
                 cashierName: currentUserName || currentUser?.displayName || (currentUser?.email ? currentUser.email.split('@')[0] : '') || (isAdminClient() ? 'Admin' : 'Kasir')
             };
             db.transactions.push(record);
+            sharedStockTransactions = [...(sharedStockTransactions || []).filter(x => String(x.id) !== String(record.id)), record];
             save();
             return record;
         }
@@ -3994,6 +4169,9 @@ let pendingPurchaseBahanId = null;
         }
 
         function renderBahan() {
+            // Perbarui saldo periode lama agar stok awal periode aktif tidak memakai
+            // hasil hitung lama yang hanya memasukkan aktivitas satu kasir.
+            recalculateStockPeriods();
             const r = getRange();
             let openingTotal = 0,
                 purchaseTotal = 0,
@@ -4001,7 +4179,7 @@ let pendingPurchaseBahanId = null;
                 endingTotal = 0;
             bahanTable.innerHTML = db.bahan.map(b => {
                 const x = stockSummary(b, r.from, r.to);
-                const pv = rangePurchases(r.from, r.to).filter(m => m.bahanId === b.id).reduce((a, m) => a + (+m.total || 0), 0);
+                const pv = stockPurchases(r.from, r.to).filter(m => m.bahanId === b.id).reduce((a, m) => a + (+m.total || 0), 0);
                 const ov = stockValue(b, x.opening),
                     uv = stockValue(b, x.used),
                     ev = stockValue(b, Math.max(0, x.ending));
@@ -4017,7 +4195,12 @@ let pendingPurchaseBahanId = null;
             stockUsageTotal.textContent = rupiah(usageTotal);
             stockEndingTotal.textContent = rupiah(endingTotal);
             stockPeriodStatus.textContent = `Periode ${r.from.split('-').reverse().join('/')} – ${r.to.split('-').reverse().join('/')} · Stok akhir dihitung otomatis`;
-            purchaseTable.innerHTML = rangePurchases(r.from, r.to).slice().reverse().map(m => `<tr><td>${formatDateID(m.date)}</td><td><b>${m.bahanName}</b></td><td>${formatQty(m.packages||0)} kemasan</td><td>${formatQty(m.qty)} ${m.unit}</td><td>${rupiah(m.cost)}</td><td>${rupiah(m.total)}</td><td>${m.note||'-'}</td><td><div style="display:flex;gap:6px"><button class="btn" title="Edit pembelian" onclick="openPurchaseModal(${m.id})">✏️ Edit</button><button class="btn" title="Hapus pembelian" onclick="deletePurchase(${m.id})">🗑️ Hapus</button></div></td></tr>`).join('') || '<tr><td colspan="8"><div class="empty">Belum ada pembelian pada periode ini.</div></td></tr>';
+            purchaseTable.innerHTML = stockPurchases(r.from, r.to).slice().reverse().map(m => {
+                const controls = canManagePurchaseRecord(m)
+                    ? `<div style="display:flex;gap:6px"><button class="btn" title="Edit pembelian" onclick="openPurchaseModal(${m.id})">✏️ Edit</button><button class="btn" title="Hapus pembelian" onclick="deletePurchase(${m.id})">🗑️ Hapus</button></div>`
+                    : '—';
+                return `<tr><td>${formatDateID(m.date)}</td><td><b>${m.bahanName}</b></td><td>${formatQty(m.packages||0)} kemasan</td><td>${formatQty(m.qty)} ${m.unit}</td><td>${rupiah(m.cost)}</td><td>${rupiah(m.total)}</td><td>${m.note||'-'}</td><td>${controls}</td></tr>`;
+            }).join('') || '<tr><td colspan="8"><div class="empty">Belum ada pembelian pada periode ini.</div></td></tr>';
             document.getElementById('stockFrom').value = r.from;
             document.getElementById('stockTo').value = r.to;
         }
@@ -4225,15 +4408,17 @@ let pendingPurchaseBahanId = null;
             openMenuModal(id)
         }
 
-        function saveMenu(id) {
+        async function saveMenu(id) {
             const valid = menuRecipeDraft.filter(r => r.bahanId && r.qty > 0);
             const hpp = recipeCost(valid);
             if (!fName.value.trim()) return toast('Nama menu wajib diisi');
             if (!+fPrice.value) return toast('Harga jual wajib diisi');
             if (!valid.length) return toast('Tambahkan minimal satu bahan ke resep');
-            const oldMenu = id ? db.menus.find(m => m.id === id) : null;
-            let x = {
-                id: id || db.nextId++,
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat menyimpan menu.');
+            const oldMenu = id ? db.menus.find(m => String(m.id) === String(id)) : null;
+            const menuId = id ? (oldMenu?.id ?? id) : db.nextId++;
+            const x = {
+                id: menuId,
                 name: fName.value.trim(),
                 cat: fCat.value,
                 price: +fPrice.value,
@@ -4241,22 +4426,35 @@ let pendingPurchaseBahanId = null;
                 emoji: fEmoji.value || ({Minuman:'🥤',Makanan:'🍜',Snack:'🍟'}[fCat.value] || '🥤'),
                 active: oldMenu ? oldMenu.active !== false : true
             };
-            if (id) db.menus = db.menus.map(m => m.id === id ? x : m);
+            if (id) db.menus = db.menus.map(m => String(m.id) === String(id) ? x : m);
             else db.menus.push(x);
             const rec = {
-                menuId: x.id,
-                items: valid.map(r => ({
-                    bahanId: +r.bahanId,
-                    qty: +r.qty
-                }))
+                menuId: menuId,
+                items: valid.map(r => ({ bahanId: +r.bahanId, qty: +r.qty }))
             };
-            const idx = db.recipes.findIndex(r => String(r.menuId ?? r.menuID ?? '') === String(x.id));
+            const idx = db.recipes.findIndex(r => String(r.menuId ?? r.menuID ?? r.menu_id ?? '') === String(menuId));
             if (idx >= 0) db.recipes[idx] = rec;
             else db.recipes.push(rec);
+
+            // Simpan lokal terlebih dahulu agar perubahan tidak hilang jika jaringan putus.
             save();
             closeModal();
             renderAll();
-            toast('Menu & resep tersimpan')
+
+            // Jangan menyatakan berhasil di cloud sebelum sinkronisasi selesai.
+            if (currentUser?.uid && firebaseReady && navigator.onLine && !offlineLocalSession) {
+                clearTimeout(syncTimer);
+                await syncFirebase(true);
+                const stillPending = localStorage.getItem('ekasir_pending_sync_' + currentUser.uid) === '1';
+                renderAll();
+                if (stillPending) {
+                    toast('Menu tersimpan di perangkat, tetapi sinkronisasi Firebase belum berhasil. Periksa status cloud.');
+                } else {
+                    toast('Menu & resep berhasil tersimpan di Firebase.');
+                }
+            } else {
+                toast('Menu tersimpan di perangkat. Sinkronisasi Firebase menunggu koneksi/login online.');
+            }
         }
 
         function openBahanModal(id = null) {
@@ -4369,7 +4567,7 @@ let pendingPurchaseBahanId = null;
                 const ending = {};
                 db.bahan.forEach(b => {
                     const opening = +(p.opening[b.id] ?? 0);
-                    const purchases = rangePurchases(p.from, p.to).filter(x => x.bahanId === b.id).reduce((a, x) => a + (+x.qty || 0), 0);
+                    const purchases = stockPurchases(p.from, p.to).filter(x => x.bahanId === b.id).reduce((a, x) => a + (+x.qty || 0), 0);
                     const used = usageForRange(b, p.from, p.to);
                     ending[b.id] = opening + purchases - used;
                 });
@@ -4400,6 +4598,7 @@ let pendingPurchaseBahanId = null;
             const purchase = { id: editId || db.nextId++, type:'purchase', date, bahanId:b.id, bahanName:b.name, packages:n, qty:n*b.content, unit:b.unit, cost:price, total:n*price, note, createdByUid: existing?.createdByUid || existing?.cashierUid || currentUser?.uid || '', createdByName: existing?.createdByName || existing?.cashierName || currentUserName || 'User' };
             if (editId) db.purchases = db.purchases.map(x => x.id === editId ? purchase : x);
             else db.purchases.push(purchase);
+            sharedStockPurchases = [...(sharedStockPurchases || []).filter(x => String(x.id) !== String(purchase.id)), purchase];
             syncPurchaseToStockMove(purchase);
             recalculateStockPeriods();
             save();
@@ -5333,13 +5532,41 @@ let pendingPurchaseBahanId = null;
     </script>
 
     <script>
+      // Tombol Install menggunakan prompt PWA resmi browser bila tersedia.
+      (function () {
+        let deferredInstallPrompt = null;
+        const installButton = document.getElementById('installAppBtn');
+        window.addEventListener('beforeinstallprompt', function (event) {
+          event.preventDefault();
+          deferredInstallPrompt = event;
+          if (installButton) installButton.classList.add('show');
+        });
+        if (installButton) {
+          installButton.addEventListener('click', async function () {
+            if (!deferredInstallPrompt) {
+              toast('Jika tombol pemasangan belum tersedia, buka menu Chrome ⋮ lalu pilih Tambahkan ke layar utama.');
+              return;
+            }
+            deferredInstallPrompt.prompt();
+            try { await deferredInstallPrompt.userChoice; } catch (_) {}
+            deferredInstallPrompt = null;
+            installButton.classList.remove('show');
+          });
+        }
+        window.addEventListener('appinstalled', function () {
+          deferredInstallPrompt = null;
+          if (installButton) installButton.classList.remove('show');
+          toast('e-Kasir berhasil dipasang.');
+        });
+      })();
+    </script>
+    <script>
       // Daftarkan service worker PWA pada halaman utama, bukan di template cetak.
       if ('serviceWorker' in navigator && location.protocol === 'https:') {
         window.addEventListener('load', function () {
-          navigator.serviceWorker.register('./service-worker.js')
-            .catch(function (error) {
-              console.warn('PWA service worker registration failed:', error);
-            });
+          navigator.serviceWorker.register('./service-worker.js', { updateViaCache: 'none' })
+            .then(function (registration) { registration.update().catch(function () {}); })
+            .catch(function (error) { console.warn('PWA service worker registration failed:', error); });
         });
       }
     </script>
