@@ -2104,9 +2104,24 @@
 }
 
 .user-role-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748b;
+    line-height: 1.2;
+}
+.user-name-label {
     font-size: 12px;
     font-weight: 800;
     color: #1f2937;
+    line-height: 1.2;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.user-chip-text { display:flex; flex-direction:column; gap:2px; min-width:0; }
+@media (max-width:760px) {
+    .user-name-label { max-width: 94px; font-size:11px; }
+    .user-role-label { font-size:10px; }
 }
 
 @media (max-width:760px) {
@@ -3423,8 +3438,9 @@ body.role-kasir #laporan .table td:nth-child(8) { display: none !important; }
             const el = document.getElementById('userChip');
             if (!el) return;
             const role = String(currentRole || '').toLowerCase();
-            const label = role === 'admin' ? 'Admin' : (role === 'kasir' ? 'Kasir' : 'User');
-            el.innerHTML = currentUser ? '<div class="user-avatar">👤</div><div class="user-role-label">' + label + '</div>' : '';
+            const roleLabel = role === 'admin' ? 'Admin' : (role === 'kasir' ? 'Kasir' : 'User');
+            const name = String(currentUserName || currentUser?.displayName || (currentUser?.email ? currentUser.email.split('@')[0] : '') || roleLabel).trim();
+            el.innerHTML = currentUser ? '<div class="user-avatar">👤</div><div class="user-chip-text"><div class="user-name-label">' + escapeHtml(name) + '</div><div class="user-role-label">' + roleLabel + '</div></div>' : '';
         }
         function showToastOfflineNotice() {
             try { toast('Mode offline: data tersimpan di HP. Login online diperlukan untuk sinkronisasi.'); } catch (_) {}
