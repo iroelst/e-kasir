@@ -4305,13 +4305,20 @@ let pendingPurchaseBahanId = null;
                 tx = rangeTransactions(r.from, r.to).slice().reverse();
             const label = document.getElementById('reportPeriodLabel');
             if (label) label.textContent = `${formatDateID(r.from)} – ${formatDateID(r.to)}`;
+            const kasirView = isKasirClient();
+            // Riwayat kasir menampilkan nilai penjualan/omzet saja, bukan HPP atau laba.
+            const reportHead = document.querySelectorAll('#laporan .table thead th');
+            if (reportHead.length >= 10) {
+                reportHead[7].style.display = kasirView ? 'none' : '';
+                reportHead[8].style.display = kasirView ? 'none' : '';
+            }
             reportTable.innerHTML = tx.map(t => {
                 const status = t.status || 'lunas';
                 const cls = status === 'lunas' ? 'status-paid' : status === 'sebagian' ? 'status-partial' : 'status-unpaid';
                 const label = status === 'lunas' ? 'Lunas' : status === 'sebagian' ? 'Belum Lunas' : 'Belum Bayar';
                 const remaining = Math.max(0, (+t.total || 0) - (+t.paidAmount || 0));
-                return `<tr><td>${formatDateID(t.date)} ${t.time}</td><td>${t.cashierName || '—'}</td><td>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</td><td>${t.pay}</td><td><span class="badge ${cls}">${label}</span></td><td>${remaining ? rupiah(remaining) : '-'}</td><td>${rupiah(t.total)}</td><td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td><td class="no-print"><button class="btn" onclick="printThermal(${t.id},80)">🧾 Nota</button>${status !== 'lunas' ? `<button class="btn" style="margin-left:5px" onclick="openSettlePayment(${t.id})">💳 Bayar</button>` : ''}</td></tr>`;
-            }).join('') || `<tr><td colspan="${isKasirClient() ? 7 : 9}"><div class="empty">Belum ada transaksi pada periode ini.</div></td></tr>`;
+                return `<tr><td>${formatDateID(t.date)} ${t.time}</td><td>${escapeHtml(t.cashierName || '—')}</td><td>${(t.items || []).map(i=>escapeHtml(i.name)+' ×'+i.qty).join(', ')}</td><td>${escapeHtml(t.pay || '')}</td><td><span class="badge ${cls}">${label}</span></td><td>${remaining ? rupiah(remaining) : '-'}</td><td><b>${rupiah(t.total)}</b></td>${kasirView ? '' : `<td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td>`}<td class="no-print"><button class="btn" onclick="printThermal(${t.id},80)">🧾 Nota</button>${status !== 'lunas' ? `<button class="btn" style="margin-left:5px" onclick="openSettlePayment(${t.id})">💳 Bayar</button>` : ''}</td></tr>`;
+            }).join('') || `<tr><td colspan="${kasirView ? 8 : 10}"><div class="empty">Belum ada transaksi pada periode ini.</div></td></tr>`;
         }
 
         function updateRecipeDraft(i) {
