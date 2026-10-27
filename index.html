@@ -3680,11 +3680,11 @@ let pendingPurchaseBahanId = null;
             document.body.style.overflow = '';
         }
 
-        function recipeCost(items) {
+        function recipeCost(items, asOf = today()) {
             return (items || []).reduce((sum, item) => {
                 const bahan = db.bahan.find(b => b.id === +item.bahanId);
                 if (!bahan) return sum;
-                return sum + unitCost(bahan) * (+item.qty || 0);
+                return sum + averageUnitCost(bahan, asOf) * (+item.qty || 0);
             }, 0);
         }
 
@@ -3937,10 +3937,17 @@ let pendingPurchaseBahanId = null;
             }
 
             const total = cart.reduce((a, i) => a + i.price * i.qty, 0);
-            const hpp = cart.reduce((a, i) => a + i.hpp * i.qty, 0);
+            // Hitung HPP dari resep dan harga modal rata-rata saat transaksi dilakukan.
+            // Nilai ini disimpan di transaksi agar laba historis tidak ikut berubah.
+            const costedItems = cart.map(i => {
+                const recipe = db.recipes.find(r => String(r.menuId) === String(i.id));
+                const liveHpp = recipe ? recipeCost(recipe.items || [], transactionDate) : (+i.hpp || 0);
+                return { ...i, hpp: liveHpp };
+            });
+            const hpp = costedItems.reduce((a, i) => a + (+i.hpp || 0) * (+i.qty || 0), 0);
 
             pendingCheckout = {
-                items: cart.map(i => ({ ...i })),
+                items: costedItems,
                 total,
                 hpp,
                 date: transactionDate,
@@ -4173,12 +4180,84 @@ let pendingPurchaseBahanId = null;
             toast(m.active ? `Menu "${m.name}" diaktifkan.` : `Menu "${m.name}" dinonaktifkan. Data transaksi lama tetap tersimpan.`);
         }
 
-        function unitCost(b) {
-            return (+b.content > 0) ? ((+b.cost || 0) / (+b.content || 1)) : 0
+        // Harga modal rata-rata tertimbang per satuan dasar.
+        // Stok awal pertama memakai harga master sebagai nilai awal; setelah itu
+        // nilai modal dibawa dari periode sebelumnya dan diperbarui setiap pembelian.
+        function averageUnitCost(b, asOf = today()) {
+            if (!b || !(+b.content > 0)) return 0;
+            const periods = Object.values(db.stockPeriods || {})
+                .filter(p => p && p.from && p.to && p.from <= asOf)
+                .sort((a, z) => String(a.from).localeCompare(String(z.from)) || String(a.to).localeCompare(String(z.to)));
+            if (!periods.length) return (+b.cost || 0) / (+b.content || 1);
+
+            let qtyOnHand = 0;
+            let avg = (+b.cost || 0) / (+b.content || 1);
+            let initialized = false;
+            let lastPeriodEnd = '';
+            for (const period of periods) {
+                if (period.from > asOf) break;
+                // Laporan dapat memakai rentang tanggal kustom yang saling tumpang tindih.
+                // Abaikan rentang yang overlap agar pembelian/pemakaian tidak dihitung dua kali.
+                if (lastPeriodEnd && period.from <= lastPeriodEnd) continue;
+                const periodEnd = period.to < asOf ? period.to : asOf;
+                const opening = +(period.opening?.[b.id] ?? 0);
+                if (!initialized) {
+                    qtyOnHand = opening;
+                    // Harga master menjadi nilai awal sementara untuk stok awal
+                    // yang tidak mempunyai riwayat harga tersimpan.
+                    initialized = true;
+                } else if (period.openingDate || qtyOnHand === 0) {
+                    qtyOnHand = opening;
+                }
+
+                const purchases = stockPurchases(period.from, periodEnd)
+                    .filter(x => String(x.bahanId) === String(b.id))
+                    .sort((a, z) => String(a.date).localeCompare(String(z.date)));
+                const dates = [...new Set(purchases.map(x => x.date).filter(Boolean))].sort();
+                // Konsumsi mengurangi jumlah, tetapi tidak mengubah harga rata-rata.
+                // Untuk setiap tanggal pembelian, kurangi pemakaian sebelum menghitung
+                // rata-rata pembelian hari itu; ini menghindari memasukkan stok yang sudah habis.
+                let cursor = period.from;
+                for (const date of dates) {
+                    if (date > asOf) continue;
+                    if (date > cursor) {
+                        const previousDay = new Date(date + 'T00:00:00');
+                        previousDay.setDate(previousDay.getDate() - 1);
+                        const usedThrough = previousDay.getFullYear() + '-' + String(previousDay.getMonth()+1).padStart(2,'0') + '-' + String(previousDay.getDate()).padStart(2,'0');
+                        if (cursor <= usedThrough) {
+                            const used = usageForRange(b, cursor, usedThrough);
+                            qtyOnHand = Math.max(0, qtyOnHand - used);
+                        }
+                    }
+                    for (const purchase of purchases.filter(x => x.date === date)) {
+                        const inQty = +purchase.qty || 0;
+                        const unitPrice = (+purchase.cost || 0) / (+b.content || 1);
+                        if (inQty > 0) {
+                            avg = qtyOnHand > 0
+                                ? ((qtyOnHand * avg) + (inQty * unitPrice)) / (qtyOnHand + inQty)
+                                : unitPrice;
+                            qtyOnHand += inQty;
+                        }
+                    }
+                    const nextDay = new Date(date + 'T00:00:00');
+                    nextDay.setDate(nextDay.getDate() + 1);
+                    cursor = nextDay.getFullYear() + '-' + String(nextDay.getMonth()+1).padStart(2,'0') + '-' + String(nextDay.getDate()).padStart(2,'0');
+                }
+                if (cursor <= periodEnd) {
+                    const used = usageForRange(b, cursor, periodEnd);
+                    qtyOnHand = Math.max(0, qtyOnHand - used);
+                }
+                lastPeriodEnd = periodEnd;
+            }
+            return Number.isFinite(avg) && avg >= 0 ? avg : ((+b.cost || 0) / (+b.content || 1));
         }
 
-        function stockValue(b, qty) {
-            return ((+qty || 0) / (+b.content || 1)) * (+b.cost || 0)
+        function unitCost(b) {
+            return averageUnitCost(b, today());
+        }
+
+        function stockValue(b, qty, asOf = today()) {
+            return Math.max(0, +qty || 0) * averageUnitCost(b, asOf);
         }
 
         function renderBahan() {
@@ -4193,15 +4272,15 @@ let pendingPurchaseBahanId = null;
             bahanTable.innerHTML = db.bahan.map(b => {
                 const x = stockSummary(b, r.from, r.to);
                 const pv = stockPurchases(r.from, r.to).filter(m => m.bahanId === b.id).reduce((a, m) => a + (+m.total || 0), 0);
-                const ov = stockValue(b, x.opening),
-                    uv = stockValue(b, x.used),
-                    ev = stockValue(b, Math.max(0, x.ending));
+                const ov = stockValue(b, x.opening, r.from),
+                    uv = stockValue(b, x.used, r.to),
+                    ev = stockValue(b, Math.max(0, x.ending), r.to);
                 openingTotal += ov;
                 purchaseTotal += pv;
                 usageTotal += uv;
                 endingTotal += ev;
                 const safe = x.ending > (+b.min || 0);
-                return `<tr><td><b>${b.name}</b></td><td>${formatQty(b.content)} ${b.unit}</td><td>${rupiah(b.cost)}</td><td>${formatQty(x.opening)} ${b.unit}</td><td>${formatQty(x.purchases)} ${b.unit}</td><td>${formatQty(x.used)} ${b.unit}</td><td><b>${formatQty(Math.max(0,x.ending))} ${b.unit}</b></td><td><b>${rupiah(ev)}</b></td><td><span class="badge ${safe?'ok':'warn'}">${safe?'Aman':'Menipis'}</span></td><td><button class="btn" onclick="editBahan(${b.id})">Edit</button></td></tr>`
+                return `<tr><td><b>${b.name}</b></td><td>${formatQty(b.content)} ${b.unit}</td><td>${rupiah(averageUnitCost(b, r.to) * (+b.content || 0))}</td><td>${formatQty(x.opening)} ${b.unit}</td><td>${formatQty(x.purchases)} ${b.unit}</td><td>${formatQty(x.used)} ${b.unit}</td><td><b>${formatQty(Math.max(0,x.ending))} ${b.unit}</b></td><td><b>${rupiah(ev)}</b></td><td><span class="badge ${safe?'ok':'warn'}">${safe?'Aman':'Menipis'}</span></td><td><button class="btn" onclick="editBahan(${b.id})">Edit</button></td></tr>`
             }).join('') || '<tr><td colspan="10"><div class="empty">Belum ada bahan. Tambahkan bahan terlebih dahulu.</div></td></tr>';
             stockOpeningTotal.textContent = rupiah(openingTotal);
             stockPurchaseTotal.textContent = rupiah(purchaseTotal);
@@ -4555,12 +4634,26 @@ let pendingPurchaseBahanId = null;
             const selectedId = editing ? editing.bahanId : pendingPurchaseBahanId;
             const opts = db.bahan.map(b => `<option value="${b.id}" ${selectedId===b.id?'selected':''}>${b.name}</option>`).join('');
             const defaultDate = editing?.date || ((today() >= r.from && today() <= r.to) ? today() : r.from);
-            openModal(editing ? 'Edit Pembelian Bahan' : 'Form Pembelian Bahan', `<p style="margin-top:0;color:var(--muted);font-size:13px">${editing ? 'Perubahan akan memperbarui riwayat pembelian dan perhitungan stok yang berkaitan.' : 'Gunakan form ini setiap kali membeli bahan. Jumlah diisi dalam <b>kemasan</b>; sistem otomatis menghitung isi yang masuk, menambah Tampil Stok, dan mencatat Riwayat Pembelian.'}</p><div class="form-grid"><div class="field full"><label>BAHAN</label><select id="pBahan" onchange="updatePurchasePreview()">${opts}</select><button type="button" class="btn" style="margin-top:8px" onclick="openBahanForPurchase()">＋ Tambah Bahan Baru</button></div><div class="field"><label>TANGGAL PEMBELIAN</label><input id="pDate" type="date" value="${defaultDate}"></div><div class="field"><label>JUMLAH KEMASAN</label><input id="pPackages" type="number" step="1" min="1" value="${editing?.packages ?? 1}" oninput="updatePurchasePreview()"></div><div class="field"><label>HARGA / KEMASAN</label><input id="pCost" type="number" min="0" value="${editing?.cost ?? ''}" oninput="updatePurchasePreview()"></div><div class="field"><label>ISI MASUK</label><input id="pQty" readonly></div><div class="field full"><label>KETERANGAN</label><input id="pNote" value="${editing?.note || ''}" placeholder="Contoh: pembelian stok"></div></div><div id="purchasePreview" style="margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:var(--muted)"></div><button class="btn primary" style="margin-top:15px" onclick="savePurchase(${editId || 0})">${editing ? 'Simpan Perubahan' : 'Simpan Pembelian'}</button>`);
+            openModal(editing ? 'Edit Pembelian Bahan' : 'Form Pembelian Bahan', `<p style="margin-top:0;color:var(--muted);font-size:13px">${editing ? 'Perubahan akan memperbarui riwayat pembelian dan perhitungan stok yang berkaitan.' : 'Gunakan form ini setiap kali membeli bahan. Jumlah diisi dalam <b>kemasan</b>; sistem otomatis menghitung isi yang masuk, menambah Tampil Stok, dan mencatat Riwayat Pembelian.'}</p><div class="form-grid"><div class="field full"><label>BAHAN</label><select id="pBahan" onchange="updatePurchasePriceDefault();updatePurchasePreview()">${opts}</select><button type="button" class="btn" style="margin-top:8px" onclick="openBahanForPurchase()">＋ Tambah Bahan Baru</button></div><div class="field"><label>TANGGAL PEMBELIAN</label><input id="pDate" type="date" value="${defaultDate}"></div><div class="field"><label>JUMLAH KEMASAN</label><input id="pPackages" type="number" step="1" min="1" value="${editing?.packages ?? 1}" oninput="updatePurchasePreview()"></div><div class="field"><label>HARGA / KEMASAN</label><input id="pCost" type="number" min="0" value="${editing?.cost ?? ''}" oninput="updatePurchasePreview()"></div><div class="field"><label>ISI MASUK</label><input id="pQty" readonly></div><div class="field full"><label>KETERANGAN</label><input id="pNote" value="${editing?.note || ''}" placeholder="Contoh: pembelian stok"></div></div><div id="purchasePreview" style="margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:var(--muted)"></div><button class="btn primary" style="margin-top:15px" onclick="savePurchase(${editId || 0})">${editing ? 'Simpan Perubahan' : 'Simpan Pembelian'}</button>`);
             const b = db.bahan.find(x => x.id === selectedId) || db.bahan[0];
             if (pendingPurchaseBahanId !== null) pendingPurchaseBahanId = null;
             const pCostEl = document.getElementById('pCost');
-            if (pCostEl) pCostEl.value = editing ? editing.cost : b.cost;
+            if (pCostEl) pCostEl.value = editing ? editing.cost : latestPurchaseCost(b.id, b.cost);
             updatePurchasePreview();
+        }
+
+        function latestPurchaseCost(bahanId, fallback = 0) {
+            const rows = stockPurchases('0000-01-01', '9999-12-31')
+                .filter(x => String(x.bahanId) === String(bahanId) && Number.isFinite(+x.cost))
+                .sort((a, b) => String(b.date).localeCompare(String(a.date)) || (+b.id || 0) - (+a.id || 0));
+            return rows.length ? (+rows[0].cost || 0) : (+fallback || 0);
+        }
+
+        function updatePurchasePriceDefault() {
+            const id = +(document.getElementById('pBahan')?.value || 0);
+            const b = db.bahan.find(x => String(x.id) === String(id));
+            const el = document.getElementById('pCost');
+            if (b && el) el.value = latestPurchaseCost(b.id, b.cost);
         }
 
         function updatePurchasePreview() {
