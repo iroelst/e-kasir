@@ -4231,7 +4231,12 @@ let pendingPurchaseBahanId = null;
                     }
                     for (const purchase of purchases.filter(x => x.date === date)) {
                         const inQty = +purchase.qty || 0;
-                        const unitPrice = (+purchase.cost || 0) / (+b.content || 1);
+                        const purchasedQty = +purchase.qty || 0;
+                        // Harga satuan dasar mengikuti isi aktual pada transaksi ini,
+                        // bukan ukuran kemasan default master bahan.
+                        const unitPrice = purchasedQty > 0
+                            ? ((+purchase.total || ((+purchase.packages || 0) * (+purchase.cost || 0))) / purchasedQty)
+                            : ((+purchase.cost || 0) / (+b.content || 1));
                         if (inQty > 0) {
                             avg = qtyOnHand > 0
                                 ? ((qtyOnHand * avg) + (inQty * unitPrice)) / (qtyOnHand + inQty)
@@ -4291,7 +4296,7 @@ let pendingPurchaseBahanId = null;
                 const controls = canManagePurchaseRecord(m)
                     ? `<div style="display:flex;gap:6px"><button class="btn" title="Edit pembelian" onclick="openPurchaseModal(${m.id})">✏️ Edit</button><button class="btn" title="Hapus pembelian" onclick="deletePurchase(${m.id})">🗑️ Hapus</button></div>`
                     : '—';
-                return `<tr><td>${formatDateID(m.date)}</td><td><b>${m.bahanName}</b></td><td>${formatQty(m.packages||0)} kemasan</td><td>${formatQty(m.qty)} ${m.unit}</td><td>${rupiah(m.cost)}</td><td>${rupiah(m.total)}</td><td>${m.note||'-'}</td><td>${controls}</td></tr>`;
+                return `<tr><td>${formatDateID(m.date)}</td><td><b>${m.bahanName}</b></td><td>${formatQty(m.packages||0)} kemasan<br><small style="color:var(--muted)">${formatQty(m.contentPerPackage || ((+m.qty||0)/Math.max(1,+m.packages||1)))} ${m.unit}/kemasan</small></td><td>${formatQty(m.qty)} ${m.unit}</td><td>${rupiah(m.cost)}</td><td>${rupiah(m.total)}</td><td>${m.note||'-'}</td><td>${controls}</td></tr>`;
             }).join('') || '<tr><td colspan="8"><div class="empty">Belum ada pembelian pada periode ini.</div></td></tr>';
             document.getElementById('stockFrom').value = r.from;
             document.getElementById('stockTo').value = r.to;
@@ -4634,7 +4639,8 @@ let pendingPurchaseBahanId = null;
             const selectedId = editing ? editing.bahanId : pendingPurchaseBahanId;
             const opts = db.bahan.map(b => `<option value="${b.id}" ${selectedId===b.id?'selected':''}>${b.name}</option>`).join('');
             const defaultDate = editing?.date || ((today() >= r.from && today() <= r.to) ? today() : r.from);
-            openModal(editing ? 'Edit Pembelian Bahan' : 'Form Pembelian Bahan', `<p style="margin-top:0;color:var(--muted);font-size:13px">${editing ? 'Perubahan akan memperbarui riwayat pembelian dan perhitungan stok yang berkaitan.' : 'Gunakan form ini setiap kali membeli bahan. Jumlah diisi dalam <b>kemasan</b>; sistem otomatis menghitung isi yang masuk, menambah Tampil Stok, dan mencatat Riwayat Pembelian.'}</p><div class="form-grid"><div class="field full"><label>BAHAN</label><select id="pBahan" onchange="updatePurchasePriceDefault();updatePurchasePreview()">${opts}</select><button type="button" class="btn" style="margin-top:8px" onclick="openBahanForPurchase()">＋ Tambah Bahan Baru</button></div><div class="field"><label>TANGGAL PEMBELIAN</label><input id="pDate" type="date" value="${defaultDate}"></div><div class="field"><label>JUMLAH KEMASAN</label><input id="pPackages" type="number" step="1" min="1" value="${editing?.packages ?? 1}" oninput="updatePurchasePreview()"></div><div class="field"><label>HARGA / KEMASAN</label><input id="pCost" type="number" min="0" value="${editing?.cost ?? ''}" oninput="updatePurchasePreview()"></div><div class="field"><label>ISI MASUK</label><input id="pQty" readonly></div><div class="field full"><label>KETERANGAN</label><input id="pNote" value="${editing?.note || ''}" placeholder="Contoh: pembelian stok"></div></div><div id="purchasePreview" style="margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:var(--muted)"></div><button class="btn primary" style="margin-top:15px" onclick="savePurchase(${editId || 0})">${editing ? 'Simpan Perubahan' : 'Simpan Pembelian'}</button>`);
+            const editingContent = editing ? (+editing.contentPerPackage || ((+editing.qty || 0) / Math.max(1, +editing.packages || 1)) || db.bahan.find(x => String(x.id) === String(selectedId))?.content || db.bahan[0]?.content || 1) : (db.bahan.find(x => String(x.id) === String(selectedId))?.content || db.bahan[0]?.content || 1);
+            openModal(editing ? 'Edit Pembelian Bahan' : 'Form Pembelian Bahan', `<p style="margin-top:0;color:var(--muted);font-size:13px">${editing ? 'Perubahan akan memperbarui riwayat pembelian dan perhitungan stok yang berkaitan.' : 'Isi jumlah kemasan, ukuran isi aktual per kemasan, dan harga beli. Ukuran bisa berbeda dari pembelian sebelumnya; stok dan resep tetap dihitung dalam satuan dasar bahan.'}</p><div class="form-grid"><div class="field full"><label>BAHAN</label><select id="pBahan" onchange="updatePurchasePriceDefault();updatePurchaseContentDefault();updatePurchasePreview()">${opts}</select><button type="button" class="btn" style="margin-top:8px" onclick="openBahanForPurchase()">＋ Tambah Bahan Baru</button></div><div class="field"><label>TANGGAL PEMBELIAN</label><input id="pDate" type="date" value="${defaultDate}"></div><div class="field"><label>JUMLAH KEMASAN</label><input id="pPackages" type="number" step="1" min="1" value="${editing?.packages ?? 1}" oninput="updatePurchasePreview()"></div><div class="field"><label>ISI PER KEMASAN (${(db.bahan.find(x => x.id === selectedId) || db.bahan[0]).unit})</label><input id="pContent" type="number" step="0.01" min="0.01" value="${editingContent}" oninput="updatePurchasePreview()"><small style="color:var(--muted)">Contoh SKM: 250 ml atau 500 ml</small></div><div class="field"><label>HARGA / KEMASAN</label><input id="pCost" type="number" min="0" value="${editing?.cost ?? ''}" oninput="updatePurchasePreview()"></div><div class="field"><label>ISI MASUK</label><input id="pQty" readonly></div><div class="field full"><label>KETERANGAN</label><input id="pNote" value="${editing?.note || ''}" placeholder="Contoh: pembelian stok"></div></div><div id="purchasePreview" style="margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:var(--muted)"></div><button class="btn primary" style="margin-top:15px" onclick="savePurchase(${editId || 0})">${editing ? 'Simpan Perubahan' : 'Simpan Pembelian'}</button>`);
             const b = db.bahan.find(x => x.id === selectedId) || db.bahan[0];
             if (pendingPurchaseBahanId !== null) pendingPurchaseBahanId = null;
             const pCostEl = document.getElementById('pCost');
@@ -4656,19 +4662,30 @@ let pendingPurchaseBahanId = null;
             if (b && el) el.value = latestPurchaseCost(b.id, b.cost);
         }
 
+        function updatePurchaseContentDefault() {
+            const b = db.bahan.find(x => String(x.id) === String(document.getElementById('pBahan')?.value || ''));
+            const el = document.getElementById('pContent');
+            if (b && el) el.value = b.content;
+            const label = document.querySelector('#pContent')?.closest('.field')?.querySelector('label');
+            if (label && b) label.textContent = 'ISI PER KEMASAN (' + b.unit + ')';
+        }
+
         function updatePurchasePreview() {
             const b = db.bahan.find(x => x.id === +(document.getElementById('pBahan')?.value || 0));
             if (!b) return;
             const pkg = document.getElementById('pPackages');
             if (pkg) {
-                pkg.step = b.unit === 'pcs' ? '1' : '0.01';
-                pkg.min = b.unit === 'pcs' ? '1' : '0.01';
+                pkg.step = '1';
+                pkg.min = '1';
             }
             const n = +(pkg?.value || 0),
+                content = +(document.getElementById('pContent')?.value || 0),
                 price = +(document.getElementById('pCost')?.value || 0),
-                qty = n * b.content;
-            document.getElementById('pQty').value = formatQty(qty) + ' ' + b.unit;
-            document.getElementById('purchasePreview').textContent = `Total pembelian: ${rupiah(n*price)} · Stok bertambah ${formatQty(qty)} ${b.unit}`;
+                qty = n * content;
+            const qtyEl = document.getElementById('pQty');
+            const preview = document.getElementById('purchasePreview');
+            if (qtyEl) qtyEl.value = formatQty(qty) + ' ' + b.unit;
+            if (preview) preview.textContent = `Total pembelian: ${rupiah(n*price)} · Stok bertambah ${formatQty(qty)} ${b.unit} · Harga dasar pembelian: ${rupiah(content > 0 ? price/content : 0)} per ${b.unit}`;
         }
 
         function recalculateStockPeriods() {
@@ -4700,15 +4717,17 @@ let pendingPurchaseBahanId = null;
             const date = document.getElementById('pDate')?.value || '';
             const n = +(document.getElementById('pPackages')?.value || 0);
             const price = +(document.getElementById('pCost')?.value || 0);
+            const content = +(document.getElementById('pContent')?.value || 0);
             const note = (document.getElementById('pNote')?.value || '').trim();
             if (!b) return toast('Pilih bahan');
             if (!date) return toast('Tanggal pembelian wajib diisi');
-            if (n <= 0) return toast('Jumlah kemasan harus lebih dari 0');
-            if (b.unit === 'pcs' && !Number.isInteger(n)) return toast('Jumlah kemasan untuk bahan pcs harus bilangan bulat');
+            if (n <= 0 || !Number.isInteger(n)) return toast('Jumlah kemasan harus bilangan bulat lebih dari 0');
+            if (content <= 0 || !Number.isFinite(content)) return toast('Isi per kemasan harus lebih dari 0');
+            if (b.unit === 'pcs' && !Number.isInteger(content)) return toast('Isi per kemasan untuk satuan pcs harus bilangan bulat');
             if (price < 0) return toast('Harga kemasan tidak valid');
             const existing = editId ? db.purchases.find(x => x.id === editId) : null;
             if (editId && !existing) return toast('Data pembelian tidak ditemukan.');
-            const purchase = { id: editId || db.nextId++, type:'purchase', date, bahanId:b.id, bahanName:b.name, packages:n, qty:n*b.content, unit:b.unit, cost:price, total:n*price, note, createdByUid: existing?.createdByUid || existing?.cashierUid || currentUser?.uid || '', createdByName: existing?.createdByName || existing?.cashierName || currentUserName || 'User' };
+            const purchase = { id: editId || db.nextId++, type:'purchase', date, bahanId:b.id, bahanName:b.name, packages:n, contentPerPackage:content, qty:n*content, unit:b.unit, cost:price, total:n*price, note, createdByUid: existing?.createdByUid || existing?.cashierUid || currentUser?.uid || '', createdByName: existing?.createdByName || existing?.cashierName || currentUserName || 'User' };
             if (editId) db.purchases = db.purchases.map(x => x.id === editId ? purchase : x);
             else db.purchases.push(purchase);
             sharedStockPurchases = [...(sharedStockPurchases || []).filter(x => String(x.id) !== String(purchase.id)), purchase];
@@ -4963,7 +4982,7 @@ let pendingPurchaseBahanId = null;
             const r = getReportRange(),
                 rows = rangePurchases(r.from, r.to).slice().sort((a, b) => String(a.date).localeCompare(String(b.date))),
                 total = rows.reduce((a, x) => a + (+x.total || 0), 0);
-            const tr = rows.map(x => `<tr><td>${formatDateID(x.date)}</td><td>${x.createdByName || x.cashierName || '—'}</td><td>${x.bahanName}</td><td class="num">${formatQty(x.packages||0)}</td><td class="num">${formatQty(x.qty)} ${x.unit}</td><td class="num">${rupiah(x.cost)}</td><td class="num">${rupiah(x.total)}</td><td>${x.note||'-'}</td></tr>`).join('');
+            const tr = rows.map(x => `<tr><td>${formatDateID(x.date)}</td><td>${x.createdByName || x.cashierName || '—'}</td><td>${x.bahanName}</td><td class="num">${formatQty(x.packages||0)} kemasan<br><small>${formatQty(x.contentPerPackage || ((+x.qty||0)/Math.max(1,+x.packages||1)))} ${x.unit}/kemasan</small></td><td class="num">${formatQty(x.qty)} ${x.unit}</td><td class="num">${rupiah(x.cost)}</td><td class="num">${rupiah(x.total)}</td><td>${x.note||'-'}</td></tr>`).join('');
             const body = reportHeader('LAPORAN PEMBELIAN BAHAN', r.from, r.to) + `<table><thead><tr><th>Tanggal</th><th>Nama Kasir</th><th>Bahan</th><th>Kemasan</th><th>Isi Masuk</th><th>Harga/Kemasan</th><th>Total</th><th>Keterangan</th></tr></thead><tbody>${tr||'<tr><td colspan="8">Tidak ada pembelian.</td></tr>'}</tbody></table><div class="summary"><table><tr><th>Total Pembelian</th><td class="num"><b>${rupiah(total)}</b></td></tr></table></div>`;
             openPrintWindow('Laporan Pembelian', body);
         }
