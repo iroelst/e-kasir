@@ -2466,6 +2466,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                 <button data-page="stok"><span>📦</span><span>Stok</span></button>
                 <button data-page="pengeluaran"><span>💸</span><span>Pengeluaran</span></button>
                 <button data-page="keuangan"><span>💰</span><span>Keuangan</span></button>
+                <button data-page="penjualan"><span>🧾</span><span>Penjualan</span></button>
                 <button data-page="laporan"><span>📊</span><span>Laporan</span></button>
                 <button data-page="pengaturan"><span>⚙️</span><span>Pengaturan</span></button>
             </nav>
@@ -2742,6 +2743,28 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                     <div id="cashFlowSummary" class="cards" style="margin-bottom:14px"></div>
                     <div style="overflow:auto"><table class="table"><thead><tr><th>Tanggal</th><th>Nama Kasir</th><th>Jenis</th><th>Keterangan</th><th>Uang Masuk</th><th>Uang Keluar</th></tr></thead><tbody id="cashFlowTable"></tbody></table></div>
                     <div class="cash-flow-note" style="margin-top:12px;color:var(--muted);font-size:12px">Catatan: saldo kas tunai dihitung berdasarkan data yang terlihat untuk akun yang sedang login. Pembelian dan pengeluaran dianggap tunai dan mengurangi saldo kas.</div>
+                </div>
+            </section>
+
+            <section id="penjualan" class="page">
+                <div class="card no-print">
+                    <div class="section-title">
+                        <div><h2>Riwayat Penjualan per Menu</h2><small style="color:var(--muted)">Ringkasan jumlah menu terjual dan total uang berdasarkan tanggal dan kasir.</small></div>
+                    </div>
+                    <div class="report-toolbar">
+                        <div class="field"><label>DARI TANGGAL</label><input id="salesFrom" type="date" onchange="renderSalesHistory()"></div>
+                        <div class="field"><label>SAMPAI TANGGAL</label><input id="salesTo" type="date" onchange="renderSalesHistory()"></div>
+                        <div class="field"><label>NAMA KASIR</label><select id="salesCashier" onchange="renderSalesHistory()"><option value="">Semua kasir</option></select></div>
+                        <div class="report-actions"><button class="btn" onclick="resetSalesFilters()">Hari Ini</button></div>
+                    </div>
+                </div>
+                <div class="cards" style="margin-top:18px">
+                    <div class="card metric"><div><small>Total Menu Terjual</small><strong id="salesTotalQty">0</strong></div><div class="icon">☕</div></div>
+                    <div class="card metric"><div><small>Total Uang Penjualan</small><strong id="salesTotalMoney">Rp0</strong></div><div class="icon">💰</div></div>
+                </div>
+                <div class="card" style="margin-top:18px">
+                    <div class="section-title"><h2>Rincian Penjualan</h2><small id="salesPeriodLabel" style="color:var(--muted)"></small></div>
+                    <div style="overflow:auto"><table class="table"><thead><tr><th>Tanggal</th><th>Nama Kasir</th><th>Nama Menu</th><th>Jumlah Terjual</th><th>Jumlah Uang</th></tr></thead><tbody id="salesHistoryTable"></tbody></table></div>
                 </div>
             </section>
 
@@ -3185,7 +3208,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
         // Hak akses menu berdasarkan role. Kasir dapat membuka Dashboard, Kasir, Pembelian, dan Laporan terbatas.
         function applyRoleAccess() {
             const kasir = isKasirClient();
-            const allowedKasirPages = ['dashboard', 'kasir', 'pembelian', 'pengeluaran', 'laporan', 'keuangan'];
+            const allowedKasirPages = ['dashboard', 'kasir', 'pembelian', 'pengeluaran', 'penjualan', 'laporan', 'keuangan'];
             const openingTitle = document.getElementById('cashOpeningTitle');
             const openingHelp = document.getElementById('cashOpeningHelp');
             const entryTitle = document.getElementById('cashEntryTitle');
@@ -3216,7 +3239,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
 
         function canAccessPage(page) {
             if (isAdminClient()) return true;
-            if (isKasirClient()) return ['dashboard', 'kasir', 'pembelian', 'pengeluaran', 'laporan', 'keuangan'].includes(page);
+            if (isKasirClient()) return ['dashboard', 'kasir', 'pembelian', 'pengeluaran', 'penjualan', 'laporan', 'keuangan'].includes(page);
             return false;
         }
 
@@ -3802,6 +3825,7 @@ let pendingPurchaseBahanId = null;
                 stok: 'Stok',
                 pengeluaran: 'Pengeluaran',
                 keuangan: 'Keuangan',
+                penjualan: 'Penjualan',
                 laporan: 'Laporan',
                 pengaturan: 'Pengaturan'
             };
@@ -4438,6 +4462,55 @@ let pendingPurchaseBahanId = null;
                 b = document.getElementById('reportTo');
             if (a && !a.value) a.value = r.from;
             if (b && !b.value) b.value = r.to;
+        }
+
+        function resetSalesFilters() {
+            const d = today();
+            const from = document.getElementById('salesFrom');
+            const to = document.getElementById('salesTo');
+            if (from) from.value = d;
+            if (to) to.value = d;
+            renderSalesHistory();
+        }
+
+        function renderSalesHistory() {
+            const fromEl = document.getElementById('salesFrom');
+            const toEl = document.getElementById('salesTo');
+            const cashierEl = document.getElementById('salesCashier');
+            if (!fromEl || !toEl || !cashierEl) return;
+            const d = today();
+            if (!fromEl.value) fromEl.value = d;
+            if (!toEl.value) toEl.value = d;
+            const from = fromEl.value, to = toEl.value;
+            if (from && to && from > to) {
+                const table = document.getElementById('salesHistoryTable');
+                if (table) table.innerHTML = '<tr><td colspan="5"><div class="empty">Tanggal awal tidak boleh melewati tanggal akhir.</div></td></tr>';
+                return;
+            }
+            const allowedTx = (db.transactions || []).filter(t => inRange(t.date, from, to) && recordBelongsToCurrentUser(t, 'transaction'));
+            const cashierNames = [...new Set((db.transactions || []).filter(t => recordBelongsToCurrentUser(t, 'transaction')).map(t => String(t.cashierName || t.createdByName || 'Kasir')).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'id',{sensitivity:'base'}));
+            const oldCashier = cashierEl.value;
+            cashierEl.innerHTML = '<option value="">Semua kasir</option>' + cashierNames.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+            if (cashierNames.includes(oldCashier)) cashierEl.value = oldCashier;
+            const selectedCashier = cashierEl.value;
+            const grouped = new Map();
+            allowedTx.filter(t => !selectedCashier || String(t.cashierName || t.createdByName || 'Kasir') === selectedCashier).forEach(t => {
+                (t.items || []).forEach(item => {
+                    const name = String(item.name || 'Menu tanpa nama');
+                    const key = `${t.date}__${String(t.cashierName || t.createdByName || 'Kasir')}__${name}`;
+                    const qty = Number(item.qty) || 0;
+                    const money = (Number(item.price) || 0) * qty;
+                    if (!grouped.has(key)) grouped.set(key, {date:t.date, cashierName:String(t.cashierName || t.createdByName || 'Kasir'), name, qty:0, money:0});
+                    const row = grouped.get(key); row.qty += qty; row.money += money;
+                });
+            });
+            const rows = [...grouped.values()].sort((a,b)=>String(b.date).localeCompare(String(a.date)) || a.name.localeCompare(b.name,'id',{sensitivity:'base'}) || a.cashierName.localeCompare(b.cashierName,'id',{sensitivity:'base'}));
+            const totalQty = rows.reduce((sum,r)=>sum+r.qty,0);
+            const totalMoney = rows.reduce((sum,r)=>sum+r.money,0);
+            document.getElementById('salesTotalQty').textContent = totalQty.toLocaleString('id-ID');
+            document.getElementById('salesTotalMoney').textContent = rupiah(totalMoney);
+            document.getElementById('salesPeriodLabel').textContent = `${formatDateID(from)} – ${formatDateID(to)}${selectedCashier ? ' · ' + selectedCashier : ''}`;
+            document.getElementById('salesHistoryTable').innerHTML = rows.map(r=>`<tr><td>${formatDateID(r.date)}</td><td>${escapeHtml(r.cashierName)}</td><td>${escapeHtml(r.name)}</td><td>${r.qty.toLocaleString('id-ID')}</td><td><b>${rupiah(r.money)}</b></td></tr>`).join('') || '<tr><td colspan="5"><div class="empty">Belum ada penjualan pada filter ini.</div></td></tr>';
         }
 
         function renderReport() {
@@ -5456,6 +5529,7 @@ let pendingPurchaseBahanId = null;
             renderBahan();
             renderPurchaseHistory();
             renderExpenses();
+            renderSalesHistory();
             renderReport();
             renderCashFinance();
             shopName.value = db.settings.name || '';
