@@ -4292,7 +4292,7 @@ let pendingPurchaseBahanId = null;
                 purchaseTotal = 0,
                 usageTotal = 0,
                 endingTotal = 0;
-            bahanTable.innerHTML = db.bahan.map(b => {
+            bahanTable.innerHTML = db.bahan.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'id', { sensitivity: 'base', numeric: true })).map(b => {
                 const x = stockSummary(b, r.from, r.to);
                 const pv = stockPurchases(r.from, r.to).filter(m => m.bahanId === b.id).reduce((a, m) => a + (+m.total || 0), 0);
                 const ov = stockValue(b, x.opening, r.from),
@@ -4381,7 +4381,7 @@ let pendingPurchaseBahanId = null;
                 purchaseHistoryCount.textContent = '0'; purchaseHistoryTotal.textContent = rupiah(0);
                 return;
             }
-            const rows = stockPurchases(r.from, r.to).filter(m => isAdminClient() || recordBelongsToCurrentUser(m, 'purchase')).slice().sort((a,b) => String(b.date).localeCompare(String(a.date)) || (+b.id||0)-(+a.id||0));
+            const rows = stockPurchases(r.from, r.to).filter(m => isAdminClient() || recordBelongsToCurrentUser(m, 'purchase')).slice().sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')) || (+b.id||0)-(+a.id||0));
             purchaseHistoryCount.textContent = rows.length.toLocaleString('id-ID');
             purchaseHistoryTotal.textContent = rupiah(rows.reduce((sum, m) => sum + (Number(m.total) || 0), 0));
             purchaseTable.innerHTML = rows.map(m => {
@@ -4409,7 +4409,7 @@ let pendingPurchaseBahanId = null;
             const ownExpenses = db.expenses.filter(e => recordBelongsToCurrentUser(e, 'expense') && inRange(e.date, r.from, r.to));
             expenseHistoryCount.textContent = ownExpenses.length.toLocaleString('id-ID');
             expenseHistoryTotal.textContent = rupiah(ownExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0));
-            expenseTable.innerHTML = ownExpenses.slice().sort((a,b) => String(b.date).localeCompare(String(a.date)) || (+b.id||0)-(+a.id||0)).map(e => {
+            expenseTable.innerHTML = ownExpenses.slice().sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')) || (+b.id||0)-(+a.id||0)).map(e => {
                 const canManage = isAdminClient() || (isKasirClient() && String(e.createdByUid || e.cashierUid || '') === String(currentUser?.uid || ''));
                 return `<tr><td>${formatDateID(e.date)}</td><td>${escapeHtml(e.cat || '')}</td><td>${escapeHtml(e.note || '')}</td><td><b>${rupiah(e.amount)}</b></td><td><div style="display:flex;gap:6px">${canManage ? `<button class="btn" title="Edit pengeluaran" onclick="openExpenseModal(${e.id})">✏️ Edit</button><button class="btn" title="Hapus pengeluaran" onclick="deleteExpense(${e.id})">🗑️ Hapus</button>` : '—'}</div></td></tr>`;
             }).join('') || '<tr><td colspan="5"><div class="empty">Belum ada pengeluaran pada tanggal yang dipilih.</div></td></tr>';
@@ -4443,7 +4443,7 @@ let pendingPurchaseBahanId = null;
         function renderReport() {
             setReportRangeDefaults();
             const r = getReportRange(),
-                tx = rangeTransactions(r.from, r.to).slice().reverse();
+                tx = rangeTransactions(r.from, r.to).slice().sort((a,b) => String(b.date||'').localeCompare(String(a.date||'')) || String(b.time||'').localeCompare(String(a.time||'')) || (+b.id||0)-(+a.id||0));
             const label = document.getElementById('reportPeriodLabel');
             if (label) label.textContent = `${formatDateID(r.from)} – ${formatDateID(r.to)}`;
             const kasirView = isKasirClient();
