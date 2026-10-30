@@ -1053,6 +1053,8 @@
         }
 
 
+        body.role-kasir .admin-transfer-field { display:none !important; }
+        body.role-kasir #cashEntryType option[value="transfer"] { display:none; }
         /* ===== LOGIN USERNAME + PASSWORD ===== */
         .auth-screen {
             position: fixed;
@@ -2712,7 +2714,9 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
 
             <section id="keuangan" class="page">
                 <div class="cards cash-finance-cards">
-                    <div class="card metric"><div><small>Saldo Kas Tunai</small><strong id="cashBalance">Rp0</strong><div class="trend">Saldo uang tunai di laci kasir</div></div><div class="icon">💵</div></div>
+                    <div class="card metric"><div><small>Saldo Kas Gabungan Warung</small><strong id="cashBalance">Rp0</strong><div class="trend">Kas admin + seluruh kas kasir</div></div><div class="icon">💵</div></div>
+                    <div class="card metric" id="adminCashMetric"><div><small>Saldo Kas Admin</small><strong id="adminCashBalance">Rp0</strong><div class="trend">Kas operasional admin unit warung</div></div><div class="icon">🏦</div></div>
+                    <div class="card metric" id="cashierCashMetric"><div><small>Saldo Kas Kasir</small><strong id="cashierCashBalance">Rp0</strong><div class="trend">Saldo kasir yang sedang login</div></div><div class="icon">🧾</div></div>
                     <div class="card metric"><div><small>Total Uang Masuk</small><strong id="cashTotalIn">Rp0</strong><div class="trend" id="cashTotalInDetails">Tambahan modal · Penjualan tunai · Penjualan non-tunai</div></div><div class="icon">📥</div></div>
                     <div class="card metric"><div><small>Total Uang Keluar</small><strong id="cashTotalOut">Rp0</strong><div class="trend" id="cashTotalOutDetails">Pembelian bahan · Pengeluaran operasional</div></div><div class="icon">📤</div></div>
                 </div>
@@ -2730,7 +2734,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                         <div class="field"><label>JENIS TRANSAKSI</label><select id="cashEntryType"><option value="modal">Tambah Modal (uang baru dari pemilik)</option><option value="setor">Setor Kas (keluar dari laci)</option></select></div>
                         <div class="field"><label>TANGGAL</label><input id="cashEntryDate" type="date"></div>
                         <div class="field"><label>NOMINAL (RP)</label><input id="cashEntryAmount" type="number" min="1" step="1" placeholder="Masukkan nominal"></div>
-                        <div class="field"><label>KETERANGAN</label><input id="cashEntryNote" placeholder="Contoh: modal tambahan / setor ke brankas"></div>
+                        <div class="field"><label>KETERANGAN</label><input id="cashEntryNote" placeholder="Contoh: modal tambahan / setor ke brankas"></div><div class="field admin-transfer-field"><label>UID KASIR TUJUAN (KHUSUS TRANSFER ADMIN)</label><input id="cashTransferUid" placeholder="Isi UID akun kasir tujuan"></div>
                     </div>
                     <button class="btn primary" style="margin-top:12px" onclick="saveCashEntry()">Simpan Transaksi Kas</button>
                 </div>
@@ -2742,7 +2746,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                     </div>
                     <div id="cashFlowSummary" class="cards" style="margin-bottom:14px"></div>
                     <div style="overflow:auto"><table class="table"><thead><tr><th>Tanggal</th><th>Nama Kasir</th><th>Jenis</th><th>Keterangan</th><th>Uang Masuk</th><th>Uang Keluar</th></tr></thead><tbody id="cashFlowTable"></tbody></table></div>
-                    <div class="cash-flow-note" style="margin-top:12px;color:var(--muted);font-size:12px">Catatan: saldo kas tunai dihitung berdasarkan data yang terlihat untuk akun yang sedang login. Pembelian dan pengeluaran dianggap tunai dan mengurangi saldo kas.</div>
+                    <div class="cash-flow-note" style="margin-top:12px;color:var(--muted);font-size:12px">Catatan: saldo kas admin dan kas masing-masing kasir dihitung terpisah. Transfer antar kas tidak dihitung sebagai pendapatan atau biaya. Pembelian dan pengeluaran mengurangi akun kas yang dipakai saat pencatatan.</div>
                 </div>
             </section>
 
@@ -2952,6 +2956,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                 stockMoves: [],
                 purchases: [],
                 stockPeriods: {},
+                cashLedger: [],
                 nextId: 1
             }
         }
@@ -2968,6 +2973,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                 ...m
             }));
             db.stockPeriods = db.stockPeriods && typeof db.stockPeriods === 'object' ? db.stockPeriods : {};
+            db.cashLedger = Array.isArray(db.cashLedger) ? db.cashLedger : [];
             db.nextId = Number.isFinite(+db.nextId) ? +db.nextId : 1;
             // Migrasi data lama: setiap pengeluaran harus memiliki ID agar bisa diedit/hapus dengan aman.
             let maxEntityId = Math.max(0, ...[].concat(db.menus, db.bahan, db.transactions, db.purchases, db.expenses, db.stockMoves).map(x => +x?.id || 0));
@@ -3280,7 +3286,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             try {
                 // Stok adalah milik bersama: baca transaksi/pembelian toko untuk kalkulasi stok,
                 // tetapi simpan data laporan kasir dalam array terpisah yang tetap terfilter.
-                const [menus, bahan, recipes, transactions, purchases, expenses, stockMoves, stockPeriods, settings, allStockTransactions, allStockPurchases] = await Promise.all([readCollection('menus'), readCollection('bahan'), readCollection('recipes'), readOwnedCollection('transactions', 'cashierUid'), readOwnedCollection('purchases', 'createdByUid'), readOwnedCollection('expenses', 'createdByUid'), isAdminClient() ? readCollection('stock') : Promise.resolve([]), readCollection('stockPeriods'), isAdminClient() ? fbFs.doc('toko/' + SHOP_ID + '/settings/profile').get() : Promise.resolve({ exists: false }), readCollection('transactions'), readCollection('purchases')]);
+                const [menus, bahan, recipes, transactions, purchases, expenses, stockMoves, stockPeriods, settings, allStockTransactions, allStockPurchases, cashLedger] = await Promise.all([readCollection('menus'), readCollection('bahan'), readCollection('recipes'), readOwnedCollection('transactions', 'cashierUid'), readOwnedCollection('purchases', 'createdByUid'), readOwnedCollection('expenses', 'createdByUid'), isAdminClient() ? readCollection('stock') : Promise.resolve([]), readCollection('stockPeriods'), isAdminClient() ? fbFs.doc('toko/' + SHOP_ID + '/settings/profile').get() : Promise.resolve({ exists: false }), readCollection('transactions'), readCollection('purchases'), isAdminClient() ? readCollection('cashLedger') : readOwnedCollection('cashLedger', 'ownerUid')]);
                 sharedStockTransactions = allStockTransactions.map(x => { delete x.__docId; return x; });
                 sharedStockPurchases = allStockPurchases.map(x => { delete x.__docId; return x; });
                 db.menus = menus.map(x => {
@@ -3307,6 +3313,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                     delete x.__docId;
                     return x
                 });
+                db.cashLedger = cashLedger.map(x => { delete x.__docId; return x; });
                 db.stockMoves = stockMoves.map(x => {
                     delete x.__docId;
                     return x
@@ -3402,7 +3409,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                 if (isAdminClient()) {
                     // Sinkronisasi rutin bersifat merge-only; tidak menghapus dokumen cloud
                     // berdasarkan salinan lokal yang mungkin belum lengkap.
-                    await Promise.all([writeArray('menus', db.menus, false), writeArray('bahan', db.bahan, false), writeArray('recipes', db.recipes, false), writeArray('transactions', db.transactions, false), writeArray('purchases', db.purchases, false), writeArray('expenses', db.expenses, false), writeArray('stock', db.stockMoves, false), writeArray('stockPeriods', Object.entries(db.stockPeriods).map(([id, v]) => ({
+                    await Promise.all([writeArray('menus', db.menus, false), writeArray('bahan', db.bahan, false), writeArray('recipes', db.recipes, false), writeArray('transactions', db.transactions, false), writeArray('purchases', db.purchases, false), writeArray('expenses', db.expenses, false), writeArray('cashLedger', db.cashLedger || [], false), writeArray('stock', db.stockMoves, false), writeArray('stockPeriods', Object.entries(db.stockPeriods).map(([id, v]) => ({
                         id,
                         ...v
                     })), false)]);
@@ -3410,7 +3417,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                         merge: true
                     })
                 } else if (isKasirClient()) {
-                    await Promise.all([writeArray('transactions', db.transactions, false), writeArray('purchases', db.purchases, false), writeArray('expenses', db.expenses, false)])
+                    await Promise.all([writeArray('transactions', db.transactions, false), writeArray('purchases', db.purchases, false), writeArray('expenses', db.expenses, false), writeArray('cashLedger', db.cashLedger || [], false)])
                 }
                 localStorage.setItem(KEY, JSON.stringify(db));
                 try { localStorage.removeItem('ekasir_pending_sync_' + currentUser.uid); } catch (_) {}
@@ -4860,7 +4867,7 @@ let pendingPurchaseBahanId = null;
             if (price < 0) return toast('Harga kemasan tidak valid');
             const existing = editId ? db.purchases.find(x => x.id === editId) : null;
             if (editId && !existing) return toast('Data pembelian tidak ditemukan.');
-            const purchase = { id: editId || db.nextId++, type:'purchase', date, bahanId:b.id, bahanName:b.name, packages:n, contentPerPackage:content, qty:n*content, unit:b.unit, cost:price, total:n*price, note, createdByUid: existing?.createdByUid || existing?.cashierUid || currentUser?.uid || '', createdByName: existing?.createdByName || existing?.cashierName || currentUserName || 'User' };
+            const purchase = { id: editId || db.nextId++, type:'purchase', date, bahanId:b.id, bahanName:b.name, packages:n, contentPerPackage:content, qty:n*content, unit:b.unit, cost:price, total:n*price, note, cashAccountType: existing?.cashAccountType || (isKasirClient() ? 'kasir' : 'admin'), cashAccountUid: existing?.cashAccountUid || currentUser?.uid || '', createdByUid: existing?.createdByUid || existing?.cashierUid || currentUser?.uid || '', createdByName: existing?.createdByName || existing?.cashierName || currentUserName || 'User' };
             if (editId) db.purchases = db.purchases.map(x => x.id === editId ? purchase : x);
             else db.purchases.push(purchase);
             sharedStockPurchases = [...(sharedStockPurchases || []).filter(x => String(x.id) !== String(purchase.id)), purchase];
@@ -4905,7 +4912,7 @@ let pendingPurchaseBahanId = null;
             const existing = editId ? db.expenses.find(x => x.id === editId) : null;
             if (editId && !existing) return toast('Data pengeluaran tidak ditemukan.');
             if (existing && !recordBelongsToCurrentUser(existing, 'expense')) return toast('Anda hanya dapat mengubah pengeluaran milik akun sendiri.');
-            const item = { id: editId || db.nextId++, date, cat, note, amount,
+            const item = { id: editId || db.nextId++, date, cat, note, amount, cashAccountType: existing?.cashAccountType || (isKasirClient() ? 'kasir' : 'admin'), cashAccountUid: existing?.cashAccountUid || currentUser?.uid || '',
                 createdByUid: existing?.createdByUid || existing?.cashierUid || currentUser?.uid || '',
                 createdByName: existing?.createdByName || existing?.cashierName || currentUserName || currentUser?.displayName || 'User' };
             if (editId) db.expenses = db.expenses.map(x => x.id === editId ? item : x);
@@ -5368,16 +5375,54 @@ let pendingPurchaseBahanId = null;
         function ensureCashFinanceData() {
             if (!db.settings || typeof db.settings !== 'object') db.settings = {};
             if (!Array.isArray(db.settings.cashEntries)) db.settings.cashEntries = [];
+            if (!Array.isArray(db.cashLedger)) db.cashLedger = [];
             if (!db.settings.cashOpening || typeof db.settings.cashOpening !== 'object') db.settings.cashOpening = { date: today(), amount: 0 };
             if (!db.settings.cashOpeningByUser || typeof db.settings.cashOpeningByUser !== 'object') db.settings.cashOpeningByUser = {};
+            // Migrasi aman: transaksi kas lama dipertahankan dan diberi identitas akun asal.
+            db.settings.cashEntries.forEach((x, i) => {
+                if (!x.id) x.id = 'legacy_cash_' + i;
+                if (!x.cashAccountType) x.cashAccountType = x.cashierUid ? 'kasir' : 'admin';
+                if (!x.cashAccountUid) x.cashAccountUid = x.cashierUid || (isAdminClient() ? currentUser?.uid || '' : '');
+            });
+            db.settings.cashEntries.forEach((x, i) => {
+                const id = 'legacy_' + String(x.id || i);
+                if (!db.cashLedger.some(y => String(y.id) === id)) db.cashLedger.push({ ...x, id, type: x.type || 'modal', cashAccountType: x.cashAccountType || (x.cashierUid ? 'kasir' : 'admin'), cashAccountUid: x.cashAccountUid || x.cashierUid || currentUser?.uid || 'admin', ownerUid: x.cashierUid || currentUser?.uid || '', ownerName: x.createdBy || 'Akun lama' });
+            });
+            const legacyAdminUid = currentUser?.uid || 'admin';
+            if (Number(db.settings.cashOpening?.amount) > 0 && !db.cashLedger.some(x => x.id === 'opening_admin_' + legacyAdminUid)) db.cashLedger.push({ id: 'opening_admin_' + legacyAdminUid, type: 'opening', date: db.settings.cashOpening.date || today(), amount: Number(db.settings.cashOpening.amount) || 0, cashAccountType: 'admin', cashAccountUid: legacyAdminUid, ownerUid: legacyAdminUid, ownerName: 'Admin' });
+            Object.entries(db.settings.cashOpeningByUser).forEach(([uid, op]) => {
+                const id = 'opening_kasir_' + uid;
+                if (Number(op?.amount) > 0 && !db.cashLedger.some(x => x.id === id)) db.cashLedger.push({ id, type: 'opening', date: op.date || today(), amount: Number(op.amount) || 0, cashAccountType: 'kasir', cashAccountUid: uid, ownerUid: uid, ownerName: op.createdBy || 'Kasir' });
+            });
+        }
+
+        function currentCashAccount() {
+            return isKasirClient()
+                ? { type: 'kasir', uid: currentUser?.uid || '', name: currentUserName || currentUser?.email || 'Kasir' }
+                : { type: 'admin', uid: currentUser?.uid || '', name: currentUserName || currentUser?.email || 'Admin' };
+        }
+
+        function ledgerOwnedByCurrentAccount(x) {
+            if (!x) return false;
+            if (isAdminClient()) return true;
+            return String(x.cashAccountType || '') === 'kasir' && String(x.cashAccountUid || x.ownerUid || '') === String(currentUser?.uid || '');
         }
 
         function getCurrentCashOpening() {
             ensureCashFinanceData();
-            if (isKasirClient() && currentUser?.uid) {
-                return db.settings.cashOpeningByUser[currentUser.uid] || { date: today(), amount: 0 };
-            }
-            return db.settings.cashOpening || { date: today(), amount: 0 };
+            const a = currentCashAccount();
+            const key = a.type === 'kasir' ? a.uid : 'admin';
+            const row = db.cashLedger.find(x => x.type === 'opening' && x.cashAccountType === a.type && String(x.cashAccountUid || '') === String(key === 'admin' ? (currentUser?.uid || '') : key));
+            if (row) return { date: row.date, amount: Number(row.amount) || 0 };
+            return a.type === 'kasir'
+                ? (db.settings.cashOpeningByUser[a.uid] || { date: today(), amount: 0 })
+                : (db.settings.cashOpening || { date: today(), amount: 0 });
+        }
+
+        function upsertCashLedger(row) {
+            const idx = db.cashLedger.findIndex(x => String(x.id) === String(row.id));
+            if (idx >= 0) db.cashLedger[idx] = { ...db.cashLedger[idx], ...row };
+            else db.cashLedger.push(row);
         }
 
         function saveCashOpening() {
@@ -5386,13 +5431,13 @@ let pendingPurchaseBahanId = null;
             const date = document.getElementById('cashOpeningDate')?.value || today();
             const amount = Number(document.getElementById('cashOpeningAmount')?.value || 0);
             if (!date || amount < 0 || !Number.isFinite(amount)) return toast('Tanggal atau saldo awal tidak valid.');
-            const opening = { date, amount, updatedAt: new Date().toISOString() };
-            if (isKasirClient() && currentUser?.uid) {
-                db.settings.cashOpeningByUser[currentUser.uid] = { ...opening, createdByUid: currentUser.uid, createdBy: currentUserName || currentUser.email || 'Kasir' };
-            } else {
-                db.settings.cashOpening = opening;
-            }
-            save(); renderAll(); toast('Saldo awal kas tunai disimpan.');
+            const a = currentCashAccount();
+            const accountUid = a.type === 'admin' ? (currentUser?.uid || 'admin') : a.uid;
+            const id = 'opening_' + a.type + '_' + accountUid;
+            upsertCashLedger({ id, type: 'opening', date, amount, cashAccountType: a.type, cashAccountUid: accountUid, ownerUid: currentUser?.uid || '', ownerName: a.name, createdByUid: currentUser?.uid || '', createdByName: a.name, updatedAt: new Date().toISOString() });
+            if (a.type === 'kasir') db.settings.cashOpeningByUser[a.uid] = { date, amount, createdByUid: a.uid, createdBy: a.name };
+            else db.settings.cashOpening = { date, amount };
+            save(); renderAll(); toast('Saldo awal ' + (a.type === 'kasir' ? 'kasir' : 'admin') + ' berhasil disimpan.');
         }
 
         function saveCashEntry() {
@@ -5403,10 +5448,23 @@ let pendingPurchaseBahanId = null;
             const amount = Number(document.getElementById('cashEntryAmount')?.value || 0);
             const note = (document.getElementById('cashEntryNote')?.value || '').trim();
             if (!date || !Number.isFinite(amount) || amount <= 0) return toast('Tanggal dan nominal wajib diisi.');
-            db.settings.cashEntries.push({ id: Date.now(), type, date, amount, note, createdAt: new Date().toISOString(), createdBy: currentUserName || currentUser?.email || (isKasirClient() ? 'Kasir' : 'Admin'), createdByUid: currentUser?.uid || '', cashierUid: isKasirClient() ? currentUser?.uid || '' : '' });
+            const a = currentCashAccount();
+            const id = 'cash_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+            if (type === 'transfer' && isAdminClient()) {
+                const targetUid = String(document.getElementById('cashTransferUid')?.value || '').trim();
+                if (!targetUid) return toast('UID kasir tujuan wajib diisi untuk transfer.');
+                // Satu transaksi transfer mengubah dua saldo, tetapi tidak dihitung sebagai omzet/biaya.
+                db.cashLedger.push({ id, type: 'transfer', date, amount, note: note || 'Transfer kas admin ke kasir', fromAccountType: 'admin', fromAccountUid: currentUser?.uid || 'admin', toAccountType: 'kasir', toAccountUid: targetUid, cashAccountType: 'admin', cashAccountUid: currentUser?.uid || 'admin', ownerUid: targetUid, ownerName: a.name, createdByUid: currentUser?.uid || '', createdByName: a.name });
+            } else if (type === 'setor' && isKasirClient()) {
+                // Setoran kasir masuk ke kas admin dan bukan biaya usaha.
+                db.cashLedger.push({ id, type: 'transfer', date, amount, note: note || 'Setoran kasir ke admin', fromAccountType: 'kasir', fromAccountUid: a.uid, toAccountType: 'admin', toAccountUid: 'admin', cashAccountType: 'kasir', cashAccountUid: a.uid, ownerUid: a.uid, ownerName: a.name, createdByUid: a.uid, createdByName: a.name });
+            } else {
+                db.cashLedger.push({ id, type, date, amount, note, cashAccountType: a.type, cashAccountUid: a.type === 'admin' ? (currentUser?.uid || 'admin') : a.uid, ownerUid: currentUser?.uid || '', ownerName: a.name, createdByUid: currentUser?.uid || '', createdByName: a.name });
+            }
             save();
             document.getElementById('cashEntryAmount').value = '';
             document.getElementById('cashEntryNote').value = '';
+            if (document.getElementById('cashTransferUid')) document.getElementById('cashTransferUid').value = '';
             renderAll(); toast('Transaksi kas berhasil disimpan.');
         }
 
@@ -5416,15 +5474,44 @@ let pendingPurchaseBahanId = null;
             return { from: from <= to ? from : to, to: from <= to ? to : from };
         }
 
+        function calculateCashAccount(type, uid) {
+            const same = x => x.cashAccountType === type && String(x.cashAccountUid || '') === String(uid || '');
+            const opening = db.cashLedger.find(x => x.type === 'opening' && same(x));
+            const openingAmount = Number(opening?.amount) || 0;
+            const start = opening?.date || '0000-00-00';
+            const ledger = (db.cashLedger || []).filter(x => x.date >= start && x.date <= today());
+            let balance = openingAmount;
+            ledger.forEach(x => {
+                if (x.type === 'opening' && same(x)) return;
+                if (x.type === 'modal' && same(x)) balance += Number(x.amount) || 0;
+                if (x.type === 'setor' && same(x)) balance -= Number(x.amount) || 0;
+                if (x.type === 'transfer' && x.fromAccountType === type && String(x.fromAccountUid) === String(uid)) balance -= Number(x.amount) || 0;
+                if (x.type === 'transfer' && x.toAccountType === type && (String(x.toAccountUid) === String(uid) || (type === 'admin' && String(x.toAccountUid) === 'admin'))) balance += Number(x.amount) || 0;
+            });
+            const tx = (db.transactions || []).filter(t => String(t.cashierUid || '') === String(uid) && t.date >= start && t.date <= today() && String(t.pay || '').toLowerCase().includes('tunai'));
+            balance += tx.reduce((a,t)=>a+Math.max(0, Number(t.paidAmount ?? (t.status === 'lunas' ? t.total : 0)) || 0),0);
+            const expenses = (db.expenses || []).filter(x => {
+                const accountType = x.cashAccountType || (String(x.createdByUid || '') === String(currentUser?.uid || '') ? (isKasirClient() ? 'kasir' : 'admin') : 'kasir');
+                const accountUid = x.cashAccountUid || x.createdByUid || '';
+                return accountType === type && String(accountUid) === String(uid) && x.date >= start && x.date <= today();
+            });
+            const purchases = (db.purchases || []).filter(x => {
+                const accountType = x.cashAccountType || (String(x.createdByUid || '') === String(currentUser?.uid || '') ? (isKasirClient() ? 'kasir' : 'admin') : 'kasir');
+                const accountUid = x.cashAccountUid || x.createdByUid || '';
+                return accountType === type && String(accountUid) === String(uid) && x.date >= start && x.date <= today();
+            });
+            balance -= expenses.reduce((a,x)=>a+(Number(x.amount)||0),0);
+            balance -= purchases.reduce((a,x)=>a+(Number(x.total)||0),0);
+            return balance;
+        }
+
         function renderCashFinance() {
             if (!document.getElementById('cashFlowTable')) return;
             ensureCashFinanceData();
+            const account = currentCashAccount();
             const opening = getCurrentCashOpening();
             const openingDate = document.getElementById('cashOpeningDate');
             const openingAmount = document.getElementById('cashOpeningAmount');
-            const entryDate = document.getElementById('cashEntryDate');
-            const fromEl = document.getElementById('cashReportFrom');
-            const toEl = document.getElementById('cashReportTo');
             if (openingDate && (!openingDate.value || openingDate.dataset.ownerUid !== (isKasirClient() ? currentUser?.uid || '' : 'admin'))) {
                 openingDate.value = opening.date || today();
                 openingDate.dataset.ownerUid = isKasirClient() ? currentUser?.uid || '' : 'admin';
@@ -5433,68 +5520,58 @@ let pendingPurchaseBahanId = null;
                 openingAmount.value = String(opening.amount || 0);
                 openingAmount.dataset.loadedFor = isKasirClient() ? currentUser?.uid || '' : 'admin';
             }
+            const entryDate = document.getElementById('cashEntryDate');
             if (entryDate && !entryDate.value) entryDate.value = today();
             const dr = defaultRange();
+            const fromEl = document.getElementById('cashReportFrom'), toEl = document.getElementById('cashReportTo');
             if (fromEl && !fromEl.value) fromEl.value = dr.from;
             if (toEl && !toEl.value) toEl.value = dr.to;
             const { from, to } = cashReportRange();
-            const cashierView = isKasirClient();
-            const dailySales = new Map();
-            (db.transactions || []).filter(t => recordBelongsToCurrentUser(t, 'transaction')).forEach(t => {
-                if (!t.date || t.date < from || t.date > to) return;
-                const paid = Math.max(0, Number(t.paidAmount ?? (t.status === 'lunas' ? t.total : 0)) || 0);
-                const day = dailySales.get(t.date) || { total: 0, cash: 0, noncash: 0 };
-                day.total += paid;
-                if (String(t.pay || '').toLowerCase().includes('tunai')) day.cash += paid;
-                else day.noncash += paid;
-                dailySales.set(t.date, day);
-            });
-            const rows = [];
-            (db.transactions || []).filter(t => recordBelongsToCurrentUser(t, 'transaction') && t.date >= from && t.date <= to).forEach(t => {
-                const paid = Math.max(0, Number(t.paidAmount ?? (t.status === 'lunas' ? t.total : 0)) || 0);
-                rows.push({ date: t.date, cashierName: t.cashierName || t.createdByName || '—', type: 'Penjualan', note: `${t.pay || 'Pembayaran'} · ${(t.items || []).map(i => `${i.name} ×${i.qty}`).join(', ')}`, masuk: paid, keluar: 0, order: 1 });
-            });
-            (db.purchases || []).filter(x => recordBelongsToCurrentUser(x, 'purchase') && x.date >= from && x.date <= to).forEach(x => rows.push({ date: x.date, cashierName: x.createdByName || x.cashierName || '—', type: 'Pembelian bahan', note: `${x.bahanName || 'Pembelian'}${x.note ? ' — ' + x.note : ''}`, masuk: 0, keluar: Number(x.total) || 0, order: 2 }));
-            (db.expenses || []).filter(x => recordBelongsToCurrentUser(x, 'expense') && x.date >= from && x.date <= to).forEach(x => rows.push({ date: x.date, cashierName: x.createdByName || x.cashierName || '—', type: 'Pengeluaran', note: `${x.cat || 'Operasional'}${x.note ? ' — ' + x.note : ''}`, masuk: 0, keluar: Number(x.amount) || 0, order: 3 }));
-            (db.settings.cashEntries || []).filter(x => recordBelongsToCurrentUser(x, 'cashEntry') && x.date >= from && x.date <= to).forEach(x => {
-                const inCash = x.type === 'modal' || x.type === 'tarik';
-                const labels = { modal: 'Tambah modal', setor: 'Setor kas (keluar laci)', tarik: 'Transaksi kas lama' };
-                rows.push({ date: x.date, cashierName: x.createdBy || currentUserName || '—', type: labels[x.type] || 'Transaksi kas', note: x.note || '-', masuk: inCash ? Number(x.amount) || 0 : 0, keluar: inCash ? 0 : Number(x.amount) || 0, order: 0 });
-            });
-            if (opening.date >= from && opening.date <= to && Number(opening.amount) > 0) rows.push({ date: opening.date, cashierName: cashierView ? (currentUserName || 'Kasir') : 'Admin', type: 'Saldo awal', note: cashierView ? 'Saldo awal kasir' : 'Saldo awal kas tunai', masuk: Number(opening.amount) || 0, keluar: 0, order: -1 });
-            rows.sort((a,b) => a.date.localeCompare(b.date) || a.order-b.order || a.type.localeCompare(b.type));
-            const masuk = rows.reduce((a,x)=>a+x.masuk,0), keluar = rows.reduce((a,x)=>a+x.keluar,0);
-            // Saldo laci: bila saldo awal diisi positif, gunakan tanggal saldo awal sebagai titik mulai.
-            // Bila saldo awal masih 0 (belum pernah diisi), hitung riwayat transaksi yang tersedia
-            // agar penjualan hari sebelumnya tidak membuat saldo laci tampil Rp0.
-            const datedMovements = []
-                .concat((db.transactions || []).filter(t => recordBelongsToCurrentUser(t, 'transaction') && t.date && t.date <= today()).map(t => t.date))
-                .concat((db.purchases || []).filter(x => recordBelongsToCurrentUser(x, 'purchase') && x.date && x.date <= today()).map(x => x.date))
-                .concat((db.expenses || []).filter(x => recordBelongsToCurrentUser(x, 'expense') && x.date && x.date <= today()).map(x => x.date))
-                .concat((db.settings.cashEntries || []).filter(x => recordBelongsToCurrentUser(x, 'cashEntry') && x.date && x.date <= today()).map(x => x.date));
-            const openingCashValue = Number(opening.amount) || 0;
-            const cashStartDate = openingCashValue > 0 ? (opening.date || '0000-00-00') : (datedMovements.length ? datedMovements.sort()[0] : (opening.date || today()));
-            const cashEntries = (db.settings.cashEntries || []).filter(x => recordBelongsToCurrentUser(x, 'cashEntry') && x.date >= cashStartDate && x.date <= today());
-            const capitalTotal = cashEntries.filter(x=>x.type==='modal').reduce((a,x)=>a+(Number(x.amount)||0),0);
-            const transfers = cashEntries.reduce((a,x)=>a+(x.type==='setor'?-(Number(x.amount)||0):0),0);
-            const cashSales = (db.transactions || []).filter(t => recordBelongsToCurrentUser(t, 'transaction') && t.date >= cashStartDate && t.date <= today() && String(t.pay || '').toLowerCase().includes('tunai')).reduce((a,t)=>a+Math.max(0, Number(t.paidAmount ?? (t.status === 'lunas' ? t.total : 0)) || 0),0);
-            // Sesuai perilaku aplikasi saat ini, pembelian dan pengeluaran dihitung sebagai uang tunai keluar.
-            const cashPurchases = (db.purchases || []).filter(x => recordBelongsToCurrentUser(x, 'purchase') && x.date >= cashStartDate && x.date <= today()).reduce((a,x)=>a+(Number(x.total)||0),0);
-            const cashExpenses = (db.expenses || []).filter(x => recordBelongsToCurrentUser(x, 'expense') && x.date >= cashStartDate && x.date <= today()).reduce((a,x)=>a+(Number(x.amount)||0),0);
-            const cashBalance = openingCashValue + cashSales + capitalTotal + transfers - cashPurchases - cashExpenses;
+            const adminUid = currentUser?.uid || 'admin';
+            const adminBalance = calculateCashAccount('admin', adminUid);
+            const ownCashierBalance = isKasirClient() ? calculateCashAccount('kasir', currentUser?.uid || '') : 0;
+            const cashierBalances = isAdminClient() ? [].concat((db.cashLedger || []).filter(x => x.cashAccountType === 'kasir' && x.cashAccountUid).map(x => ({uid:x.cashAccountUid, name:x.ownerName || x.createdByName || 'Kasir'})), (db.transactions || []).map(x => ({uid:x.cashierUid, name:x.cashierName || 'Kasir'})), (db.purchases || []).map(x => ({uid:x.createdByUid, name:x.createdByName || 'Kasir'})), (db.expenses || []).map(x => ({uid:x.createdByUid, name:x.createdByName || 'Kasir'}))).filter(x => x.uid && x.uid !== adminUid) : [];
+            const uniqueCashiers = [...new Map(cashierBalances.map(x=>[x.uid,x])).values()];
+            const allCashierBalance = isAdminClient() ? uniqueCashiers.reduce((sum,x)=>sum+calculateCashAccount('kasir',x.uid),0) : ownCashierBalance;
+            const combined = isAdminClient() ? adminBalance + allCashierBalance : ownCashierBalance;
             const el = id => document.getElementById(id);
-            if (el('cashBalance')) el('cashBalance').textContent = rupiah(cashBalance);
-            const periodCapital = rows.filter(x => x.type === 'Tambah modal').reduce((a,x)=>a+x.masuk,0);
-            const periodCashSales = [...dailySales.values()].reduce((a,x)=>a+x.cash,0);
-            const periodNoncashSales = [...dailySales.values()].reduce((a,x)=>a+x.noncash,0);
-            const periodPurchases = rows.filter(x => x.type === 'Pembelian bahan').reduce((a,x)=>a+x.keluar,0);
-            const periodExpenses = rows.filter(x => x.type === 'Pengeluaran').reduce((a,x)=>a+x.keluar,0);
-            if (el('cashTotalIn')) el('cashTotalIn').textContent = rupiah(periodCapital + periodCashSales + periodNoncashSales + (opening.date >= from && opening.date <= to ? Number(opening.amount)||0 : 0));
-            if (el('cashTotalInDetails')) el('cashTotalInDetails').textContent = `Saldo awal ${rupiah(opening.date >= from && opening.date <= to ? Number(opening.amount)||0 : 0)} · Tambahan modal ${rupiah(periodCapital)} · Penjualan tunai ${rupiah(periodCashSales)} · Non-tunai ${rupiah(periodNoncashSales)}`;
-            if (el('cashTotalOut')) el('cashTotalOut').textContent = rupiah(periodPurchases + periodExpenses + rows.filter(x => x.type === 'Setor kas (keluar laci)').reduce((a,x)=>a+x.keluar,0));
-            if (el('cashTotalOutDetails')) el('cashTotalOutDetails').textContent = `Setor kas ${rupiah(rows.filter(x => x.type === 'Setor kas (keluar laci)').reduce((a,x)=>a+x.keluar,0))} · Pembelian bahan ${rupiah(periodPurchases)} · Pengeluaran operasional ${rupiah(periodExpenses)}`;
-            if (el('cashFlowSummary')) el('cashFlowSummary').innerHTML = '';
-            if (el('cashFlowTable')) el('cashFlowTable').innerHTML = rows.map(x=>`<tr><td>${formatDateID(x.date)}</td><td>${x.cashierName || '—'}</td><td>${x.type}</td><td>${x.note}</td><td>${x.masuk ? rupiah(x.masuk) : '-'}</td><td>${x.keluar ? rupiah(x.keluar) : '-'}</td></tr>`).join('') || '<tr><td colspan="6"><div class="empty">Belum ada arus kas pada periode ini.</div></td></tr>';
+            if (el('cashBalance')) el('cashBalance').textContent = rupiah(combined);
+            if (el('adminCashBalance')) el('adminCashBalance').textContent = rupiah(adminBalance);
+            if (el('cashierCashBalance')) el('cashierCashBalance').textContent = rupiah(isAdminClient() ? allCashierBalance : ownCashierBalance);
+            if (el('adminCashMetric')) el('adminCashMetric').style.display = isAdminClient() ? '' : 'none';
+            if (el('cashierCashMetric')) el('cashierCashMetric').style.display = '';
+            if (el('cashierCashMetric') && isKasirClient()) el('cashierCashMetric').querySelector('small').textContent = 'Saldo Kas Saya';
+            const rows = [];
+            const ledger = (db.cashLedger || []).filter(x => ledgerOwnedByCurrentAccount(x) && x.date >= from && x.date <= to);
+            ledger.forEach(x => {
+                let masuk=0, keluar=0, label=x.type;
+                if (x.type==='opening') { masuk=Number(x.amount)||0; label='Saldo awal'; }
+                if (x.type==='modal') { masuk=Number(x.amount)||0; label='Tambah modal'; }
+                if (x.type==='setor') { keluar=Number(x.amount)||0; label='Setor kas'; }
+                if (x.type==='transfer') {
+                    const isFrom = x.fromAccountType === account.type && String(x.fromAccountUid) === String(account.type==='admin' ? adminUid : account.uid);
+                    const isTo = x.toAccountType === account.type && (String(x.toAccountUid) === String(account.type==='admin' ? adminUid : account.uid) || (account.type === 'admin' && String(x.toAccountUid) === 'admin'));
+                    if (isFrom) { keluar=Number(x.amount)||0; label='Transfer ke kasir'; }
+                    if (isTo) { masuk=Number(x.amount)||0; label='Transfer dari admin'; }
+                }
+                if (masuk || keluar) rows.push({date:x.date, cashierName:x.ownerName || x.createdByName || '—', type:label, note:x.note || '-', masuk, keluar, order:0});
+            });
+            (db.transactions || []).filter(t => recordBelongsToCurrentUser(t,'transaction') && t.date >= from && t.date <= to && String(t.pay||'').toLowerCase().includes('tunai')).forEach(t=>rows.push({date:t.date,cashierName:t.cashierName||'—',type:'Penjualan tunai',note:(t.items||[]).map(i=>`${i.name} ×${i.qty}`).join(', '),masuk:Math.max(0,Number(t.paidAmount ?? (t.status==='lunas'?t.total:0))||0),keluar:0,order:1}));
+            const isAccountExpense = x => {
+                const inferredType = x.cashAccountType || (String(x.createdByUid||'') === String(currentUser?.uid||'') ? (isKasirClient()?'kasir':'admin') : 'kasir');
+                const inferredUid = x.cashAccountUid || x.createdByUid || '';
+                return inferredType === account.type && String(inferredUid) === String(account.type==='admin'?adminUid:account.uid);
+            };
+            (db.purchases||[]).filter(x=>recordBelongsToCurrentUser(x,'purchase') && x.date>=from && x.date<=to && isAccountExpense(x)).forEach(x=>rows.push({date:x.date,cashierName:x.createdByName||'—',type:'Pembelian bahan',note:x.bahanName||'Pembelian',masuk:0,keluar:Number(x.total)||0,order:2}));
+            (db.expenses||[]).filter(x=>recordBelongsToCurrentUser(x,'expense') && x.date>=from && x.date<=to && isAccountExpense(x)).forEach(x=>rows.push({date:x.date,cashierName:x.createdByName||'—',type:'Pengeluaran',note:`${x.cat||'Operasional'}${x.note?' — '+x.note:''}`,masuk:0,keluar:Number(x.amount)||0,order:3}));
+            rows.sort((a,b)=>a.date.localeCompare(b.date)||a.order-b.order||a.type.localeCompare(b.type));
+            const periodIn=rows.reduce((a,x)=>a+x.masuk,0), periodOut=rows.reduce((a,x)=>a+x.keluar,0);
+            if (el('cashTotalIn')) el('cashTotalIn').textContent=rupiah(periodIn);
+            if (el('cashTotalInDetails')) el('cashTotalInDetails').textContent='Uang masuk pada akun kas yang dipilih';
+            if (el('cashTotalOut')) el('cashTotalOut').textContent=rupiah(periodOut);
+            if (el('cashTotalOutDetails')) el('cashTotalOutDetails').textContent='Uang keluar pada akun kas yang dipilih';
+            if (el('cashFlowSummary')) el('cashFlowSummary').innerHTML = isAdminClient() ? `<div class="card metric"><div><small>Kas Admin</small><strong>${rupiah(adminBalance)}</strong></div></div><div class="card metric"><div><small>Kas Seluruh Kasir</small><strong>${rupiah(allCashierBalance)}</strong></div></div><div class="card metric"><div><small>Total Kas Warung</small><strong>${rupiah(combined)}</strong></div></div>` : `<div class="card metric"><div><small>Saldo Kas Saya</small><strong>${rupiah(ownCashierBalance)}</strong></div></div>`;
+            if (el('cashFlowTable')) el('cashFlowTable').innerHTML=rows.map(x=>`<tr><td>${formatDateID(x.date)}</td><td>${x.cashierName||'—'}</td><td>${x.type}</td><td>${x.note}</td><td>${x.masuk?rupiah(x.masuk):'-'}</td><td>${x.keluar?rupiah(x.keluar):'-'}</td></tr>`).join('')||'<tr><td colspan="6"><div class="empty">Belum ada arus kas pada periode ini.</div></td></tr>';
         }
 
         function printCashFlow() {
@@ -5509,7 +5586,7 @@ let pendingPurchaseBahanId = null;
             const totalOut = document.getElementById('cashTotalOut')?.textContent || rupiah(0);
             const totalOutDetails = document.getElementById('cashTotalOutDetails')?.textContent || '';
             const balance = document.getElementById('cashBalance')?.textContent || '';
-            const body = reportHeader('LAPORAN ARUS KAS', from, to) + `
+            const body = reportHeader('LAPORAN ARUS KAS — ' + (isKasirClient() ? 'KAS KASIR' : 'KAS ADMIN & KASIR'), from, to) + `
                 <table class="summary-cards"><thead><tr><th>Saldo Kas Tunai</th><th>Total Uang Masuk</th><th>Total Uang Keluar</th></tr></thead>
                 <tbody><tr><td><b>${balance || '-'}</b></td><td><b>${totalIn}</b><br><small>${totalInDetails}</small></td><td><b>${totalOut}</b><br><small>${totalOutDetails}</small></td></tr></tbody></table>
                 <h3>Rincian Arus Kas</h3><table><thead><tr><th>Tanggal</th><th>Nama Kasir</th><th>Jenis</th><th>Keterangan</th><th>Uang Masuk</th><th>Uang Keluar</th></tr></thead><tbody>${rows || '<tr><td colspan="6">Tidak ada transaksi pada periode ini.</td></tr>'}</tbody></table>
