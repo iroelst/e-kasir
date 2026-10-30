@@ -2714,7 +2714,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
 
             <section id="keuangan" class="page">
                 <div class="cards cash-finance-cards">
-                    <div class="card metric"><div><small>Saldo Kas Gabungan Warung</small><strong id="cashBalance">Rp0</strong><div class="trend">Kas admin + seluruh kas kasir</div></div><div class="icon">💵</div></div>
+                    <div class="card metric" id="combinedCashMetric"><div><small>Saldo Kas Gabungan Warung</small><strong id="cashBalance">Rp0</strong><div class="trend">Kas admin + seluruh kas kasir</div></div><div class="icon">💵</div></div>
                     <div class="card metric" id="adminCashMetric"><div><small>Saldo Kas Admin</small><strong id="adminCashBalance">Rp0</strong><div class="trend">Kas operasional admin unit warung</div></div><div class="icon">🏦</div></div>
                     <div class="card metric" id="cashierCashMetric"><div><small>Saldo Kas Kasir</small><strong id="cashierCashBalance">Rp0</strong><div class="trend">Saldo kasir yang sedang login</div></div><div class="icon">🧾</div></div>
                     <div class="card metric"><div><small>Total Uang Masuk</small><strong id="cashTotalIn">Rp0</strong><div class="trend" id="cashTotalInDetails">Tambahan modal · Penjualan tunai · Penjualan non-tunai</div></div><div class="icon">📥</div></div>
@@ -5538,6 +5538,7 @@ let pendingPurchaseBahanId = null;
             if (el('cashBalance')) el('cashBalance').textContent = rupiah(combined);
             if (el('adminCashBalance')) el('adminCashBalance').textContent = rupiah(adminBalance);
             if (el('cashierCashBalance')) el('cashierCashBalance').textContent = rupiah(isAdminClient() ? allCashierBalance : ownCashierBalance);
+            if (el('combinedCashMetric')) el('combinedCashMetric').style.display = isAdminClient() ? '' : 'none';
             if (el('adminCashMetric')) el('adminCashMetric').style.display = isAdminClient() ? '' : 'none';
             if (el('cashierCashMetric')) el('cashierCashMetric').style.display = '';
             if (el('cashierCashMetric') && isKasirClient()) el('cashierCashMetric').querySelector('small').textContent = 'Saldo Kas Saya';
