@@ -4527,7 +4527,7 @@ let pendingPurchaseBahanId = null;
             return String(uid) === String(currentUser.uid);
         }
 
-        function deleteTransaction(id) {
+        async function deleteTransaction(id) {
             const transaction = (db.transactions || []).find(t => String(t.id) === String(id));
             if (!transaction) return toast('Transaksi tidak ditemukan.');
             if (!canManageTransactionRecord(transaction)) {
@@ -4537,22 +4537,44 @@ let pendingPurchaseBahanId = null;
             const itemSummary = (transaction.items || [])
                 .map(item => `${item.name || 'Menu'} ×${item.qty || 0}`)
                 .join(', ');
-            const stockNote = (transaction.items || []).some(item =>
-                db.recipes.some(recipe => String(recipe.menuId) === String(item.id))
-            ) ? '\\n\\nStok bahan dari resep transaksi ini akan dikembalikan otomatis.' : '';
-            const warning = `Hapus transaksi tanggal ${formatDateID(transaction.date)} (${itemSummary}) senilai ${rupiah(transaction.total)}?\\n\\nTransaksi akan dihapus dari riwayat dan laporan, termasuk perhitungan omzet/kas.${stockNote}\\n\\nTindakan ini tidak dapat dibatalkan.`;
+            const hasRecipe = (transaction.items || []).some(item =>
+                (db.recipes || []).some(recipe => String(recipe.menuId) === String(item.id))
+            );
+            const stockNote = hasRecipe
+                ? '\n\nStok bahan dari resep transaksi ini akan dikembalikan otomatis.'
+                : '';
+            const warning = `Hapus transaksi tanggal ${formatDateID(transaction.date)} (${itemSummary}) senilai ${rupiah(transaction.total)}?` +
+                '\n\nTransaksi akan dihapus dari riwayat dan laporan, termasuk perhitungan omzet/kas.' +
+                stockNote +
+                '\n\nTindakan ini tidak dapat dibatalkan.';
             if (!confirm(warning)) return;
 
+            // Hapus dokumen di Firestore terlebih dahulu agar tidak muncul kembali
+            // saat aplikasi memuat ulang data dari cloud.
+            if (!navigator.onLine) {
+                return toast('Penghapusan membutuhkan koneksi internet. Hubungkan internet lalu coba lagi.');
+            }
+            if (!firebaseReady || !currentUser?.uid || !fbAuth?.currentUser ||
+                fbAuth.currentUser.uid !== currentUser.uid) {
+                return toast('Sesi Firebase belum siap. Silakan login ulang lalu coba lagi.');
+            }
+
+            try {
+                await colRef('transactions').doc(String(transaction.id)).delete();
+            } catch (e) {
+                console.error('Gagal menghapus transaksi dari Firestore:', e);
+                return toast('Gagal menghapus transaksi dari Firebase: ' + (e.message || 'Periksa izin Firestore Rules.'));
+            }
+
             db.transactions = (db.transactions || []).filter(t => String(t.id) !== String(id));
-            // Data transaksi bersama dipakai sebagai sumber perhitungan stok lintas kasir.
-            // Hapus juga salinan bersama agar transaksi yang dihapus tidak tetap mengurangi stok.
+            // Sumber transaksi bersama dipakai untuk menghitung pemakaian stok lintas kasir.
             sharedStockTransactions = (sharedStockTransactions || [])
                 .filter(t => String(t.id) !== String(id));
 
             recalculateStockPeriods();
             save();
             renderAll();
-            toast('Transaksi dihapus. Stok bahan dan laporan telah disesuaikan.');
+            toast('Transaksi berhasil dihapus dari Firebase. Stok dan laporan telah disesuaikan.');
         }
 
         function renderReport() {
