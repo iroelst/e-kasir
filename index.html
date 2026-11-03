@@ -4529,7 +4529,7 @@ let pendingPurchaseBahanId = null;
 
         async function deleteTransaction(id) {
             const transaction = (db.transactions || []).find(t => String(t.id) === String(id));
-            if (!transaction) return toast('Transaksi tidak ditemukan.');
+            if (!transaction) return toast('Transaksi tidak ditemukan. Muat ulang data lalu coba lagi.');
             if (!canManageTransactionRecord(transaction)) {
                 return toast('Anda hanya dapat menghapus transaksi milik akun sendiri.');
             }
@@ -4549,8 +4549,6 @@ let pendingPurchaseBahanId = null;
                 '\n\nTindakan ini tidak dapat dibatalkan.';
             if (!confirm(warning)) return;
 
-            // Hapus dokumen di Firestore terlebih dahulu agar tidak muncul kembali
-            // saat aplikasi memuat ulang data dari cloud.
             if (!navigator.onLine) {
                 return toast('Penghapusan membutuhkan koneksi internet. Hubungkan internet lalu coba lagi.');
             }
@@ -4559,22 +4557,64 @@ let pendingPurchaseBahanId = null;
                 return toast('Sesi Firebase belum siap. Silakan login ulang lalu coba lagi.');
             }
 
-            try {
-                await colRef('transactions').doc(String(transaction.id)).delete();
-            } catch (e) {
-                console.error('Gagal menghapus transaksi dari Firestore:', e);
-                return toast('Gagal menghapus transaksi dari Firebase: ' + (e.message || 'Periksa izin Firestore Rules.'));
-            }
+            // Cocokkan ID sekaligus pemilik bila tersedia agar ID yang kebetulan
+            // sama milik kasir lain tidak ikut terhapus.
+            const targetOwner = transaction.cashierUid || transaction.createdByUid || '';
+            const isTargetTransaction = t => {
+                if (String(t.id) !== String(id)) return false;
+                const owner = t.cashierUid || t.createdByUid || '';
+                return !targetOwner || !owner || String(owner) === String(targetOwner);
+            };
 
-            db.transactions = (db.transactions || []).filter(t => String(t.id) !== String(id));
-            // Sumber transaksi bersama dipakai untuk menghitung pemakaian stok lintas kasir.
+            // Hapus dari salinan lokal terlebih dahulu, lalu sinkronkan data tersisa.
+            db.transactions = (db.transactions || []).filter(t => !isTargetTransaction(t));
             sharedStockTransactions = (sharedStockTransactions || [])
-                .filter(t => String(t.id) !== String(id));
-
+                .filter(t => !isTargetTransaction(t));
             recalculateStockPeriods();
-            save();
-            renderAll();
-            toast('Transaksi berhasil dihapus dari Firebase. Stok dan laporan telah disesuaikan.');
+            normalizeDb();
+            localStorage.setItem(KEY, JSON.stringify(db));
+
+            // Batalkan sinkronisasi tertunda agar tidak menulis ulang salinan transaksi lama.
+            if (typeof syncTimer !== 'undefined' && syncTimer) clearTimeout(syncTimer);
+
+            try {
+                // Sinkronkan data terbaru terlebih dahulu. writeArray bersifat merge-only,
+                // sehingga penghapusan dokumen dilakukan secara eksplisit sesudahnya.
+                await syncFirebase(true);
+
+                // Versi lama aplikasi pernah menyimpan dokumen dengan ID otomatis,
+                // bukan ID transaksi. Cari berdasarkan ID dokumen DAN field data.id.
+                const snapshot = await colRef('transactions').get();
+                const matchingDocs = snapshot.docs.filter(doc => {
+                    const data = doc.data() || {};
+                    const sameId = String(doc.id) === String(id) || String(data.id) === String(id);
+                    if (!sameId) return false;
+                    const owner = data.cashierUid || data.createdByUid || '';
+                    if (isKasirClient() && String(owner) !== String(currentUser.uid)) return false;
+                    return !targetOwner || !owner || String(owner) === String(targetOwner);
+                });
+
+                if (!matchingDocs.length) {
+                    throw new Error('Dokumen transaksi tidak ditemukan di Firebase. Periksa apakah data berasal dari toko/proyek Firebase yang sama.');
+                }
+
+                await Promise.all(matchingDocs.map(doc => doc.ref.delete()));
+
+                // Pastikan cache lokal tetap bersih setelah penghapusan cloud.
+                db.transactions = (db.transactions || []).filter(t => !isTargetTransaction(t));
+                sharedStockTransactions = (sharedStockTransactions || [])
+                    .filter(t => !isTargetTransaction(t));
+                normalizeDb();
+                localStorage.setItem(KEY, JSON.stringify(db));
+                renderAll();
+                toast('Transaksi berhasil dihapus permanen dari Firebase. Stok dan laporan telah disesuaikan.');
+            } catch (e) {
+                console.error('Gagal menghapus transaksi:', e);
+                // Jangan kembalikan transaksi ke tampilan lokal; tampilkan error agar
+                // pengguna tahu bahwa penghapusan cloud belum dapat dipastikan.
+                renderAll();
+                toast('Penghapusan belum tuntas: ' + (e.message || 'Periksa koneksi dan Firestore Rules.'));
+            }
         }
 
         function renderReport() {
