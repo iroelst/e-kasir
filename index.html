@@ -4520,6 +4520,41 @@ let pendingPurchaseBahanId = null;
             document.getElementById('salesHistoryTable').innerHTML = rows.map(r=>`<tr><td>${formatDateID(r.date)}</td><td>${escapeHtml(r.cashierName)}</td><td>${escapeHtml(r.name)}</td><td>${r.qty.toLocaleString('id-ID')}</td><td><b>${rupiah(r.money)}</b></td></tr>`).join('') || '<tr><td colspan="5"><div class="empty">Belum ada penjualan pada filter ini.</div></td></tr>';
         }
 
+        function canManageTransactionRecord(record) {
+            if (isAdminClient()) return true;
+            if (!isKasirClient() || !currentUser?.uid || !record) return false;
+            const uid = record.cashierUid || record.createdByUid || '';
+            return String(uid) === String(currentUser.uid);
+        }
+
+        function deleteTransaction(id) {
+            const transaction = (db.transactions || []).find(t => String(t.id) === String(id));
+            if (!transaction) return toast('Transaksi tidak ditemukan.');
+            if (!canManageTransactionRecord(transaction)) {
+                return toast('Anda hanya dapat menghapus transaksi milik akun sendiri.');
+            }
+
+            const itemSummary = (transaction.items || [])
+                .map(item => `${item.name || 'Menu'} ×${item.qty || 0}`)
+                .join(', ');
+            const stockNote = (transaction.items || []).some(item =>
+                db.recipes.some(recipe => String(recipe.menuId) === String(item.id))
+            ) ? '\\n\\nStok bahan dari resep transaksi ini akan dikembalikan otomatis.' : '';
+            const warning = `Hapus transaksi tanggal ${formatDateID(transaction.date)} (${itemSummary}) senilai ${rupiah(transaction.total)}?\\n\\nTransaksi akan dihapus dari riwayat dan laporan, termasuk perhitungan omzet/kas.${stockNote}\\n\\nTindakan ini tidak dapat dibatalkan.`;
+            if (!confirm(warning)) return;
+
+            db.transactions = (db.transactions || []).filter(t => String(t.id) !== String(id));
+            // Data transaksi bersama dipakai sebagai sumber perhitungan stok lintas kasir.
+            // Hapus juga salinan bersama agar transaksi yang dihapus tidak tetap mengurangi stok.
+            sharedStockTransactions = (sharedStockTransactions || [])
+                .filter(t => String(t.id) !== String(id));
+
+            recalculateStockPeriods();
+            save();
+            renderAll();
+            toast('Transaksi dihapus. Stok bahan dan laporan telah disesuaikan.');
+        }
+
         function renderReport() {
             setReportRangeDefaults();
             const r = getReportRange(),
@@ -4538,7 +4573,7 @@ let pendingPurchaseBahanId = null;
                 const cls = status === 'lunas' ? 'status-paid' : status === 'sebagian' ? 'status-partial' : 'status-unpaid';
                 const label = status === 'lunas' ? 'Lunas' : status === 'sebagian' ? 'Belum Lunas' : 'Belum Bayar';
                 const remaining = Math.max(0, (+t.total || 0) - (+t.paidAmount || 0));
-                return `<tr><td>${formatDateID(t.date)} ${t.time}</td><td>${escapeHtml(t.cashierName || '—')}</td><td>${(t.items || []).map(i=>escapeHtml(i.name)+' ×'+i.qty).join(', ')}</td><td>${escapeHtml(t.pay || '')}</td><td><span class="badge ${cls}">${label}</span></td><td>${remaining ? rupiah(remaining) : '-'}</td><td><b>${rupiah(t.total)}</b></td>${kasirView ? '' : `<td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td>`}<td class="no-print"><button class="btn" onclick="printThermal(${t.id},80)">🧾 Nota</button>${status !== 'lunas' ? `<button class="btn" style="margin-left:5px" onclick="openSettlePayment(${t.id})">💳 Bayar</button>` : ''}</td></tr>`;
+                return `<tr><td>${formatDateID(t.date)} ${t.time}</td><td>${escapeHtml(t.cashierName || '—')}</td><td>${(t.items || []).map(i=>escapeHtml(i.name)+' ×'+i.qty).join(', ')}</td><td>${escapeHtml(t.pay || '')}</td><td><span class="badge ${cls}">${label}</span></td><td>${remaining ? rupiah(remaining) : '-'}</td><td><b>${rupiah(t.total)}</b></td>${kasirView ? '' : `<td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td>`}<td class="no-print"><div style="display:flex;gap:5px;flex-wrap:wrap"><button class="btn" onclick="printThermal(${t.id},80)">🧾 Nota</button>${status !== 'lunas' ? `<button class="btn" onclick="openSettlePayment(${t.id})">💳 Bayar</button>` : ''}${canManageTransactionRecord(t) ? `<button class="btn danger" onclick="deleteTransaction(${JSON.stringify(String(t.id))})">🗑️ Hapus</button>` : ''}</div></td></tr>`;
             }).join('') || `<tr><td colspan="${kasirView ? 8 : 10}"><div class="empty">Belum ada transaksi pada periode ini.</div></td></tr>`;
         }
 
