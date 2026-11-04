@@ -2942,6 +2942,10 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
         // Salinan bersama khusus perhitungan stok; laporan kasir tetap memakai data miliknya.
         let sharedStockTransactions = [];
         let sharedStockPurchases = [];
+        // Snapshot terakhir yang telah dikonfirmasi Firestore. Dipakai untuk
+        // mengirim hanya dokumen yang berubah, bukan seluruh koleksi.
+        let firestoreBaseline = null;
+        let firestoreSaveQueue = Promise.resolve();
         let firebaseReady = false;
         // Sesi lokal hanya untuk membuka data perangkat ketika Firebase Auth tidak tersedia.
         // Tidak boleh melakukan penulisan cloud sampai Firebase mengonfirmasi user asli.
@@ -3350,8 +3354,8 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                     readCollection('menus'),
                     readCollection('bahan'),
                     readCollection('recipes'),
-                    admin ? Promise.resolve(null) : readOwnedCollection('transactions', 'cashierUid'),
-                    admin ? Promise.resolve(null) : readOwnedCollection('purchases', 'createdByUid'),
+                    Promise.resolve(null),
+                    Promise.resolve(null),
                     admin ? readCollection('expenses') : readOwnedCollection('expenses', 'createdByUid'),
                     admin ? readCollection('stock') : Promise.resolve([]),
                     readCollection('stockPeriods'),
@@ -3360,10 +3364,16 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                     readCollection('purchases'),
                     admin ? readCollection('cashLedger') : readOwnedCollection('cashLedger', 'ownerUid')
                 ]);
-                const transactions = admin ? allStockTransactions : ownedTransactions;
-                const purchases = admin ? allStockPurchases : ownedPurchases;
-                sharedStockTransactions = dedupeCloudRecords(allStockTransactions, 'transaction').map(x => { delete x.__docId; return x; });
-                sharedStockPurchases = dedupeCloudRecords(allStockPurchases, 'purchase').map(x => { delete x.__docId; return x; });
+                // Query transaksi/pembelian toko yang sama dipakai sekaligus untuk
+                // stok bersama dan data akun. Jangan jalankan query kedua khusus Kasir.
+                const transactions = admin ? allStockTransactions : allStockTransactions.filter(x =>
+                    String(x.cashierUid || x.createdByUid || '') === String(currentUser?.uid || '')
+                );
+                const purchases = admin ? allStockPurchases : allStockPurchases.filter(x =>
+                    String(x.createdByUid || x.cashierUid || '') === String(currentUser?.uid || '')
+                );
+                sharedStockTransactions = dedupeCloudRecords(allStockTransactions, 'transaction');
+                sharedStockPurchases = dedupeCloudRecords(allStockPurchases, 'purchase');
                 db.menus = menus.map(x => {
                     delete x.__docId;
                     return x
@@ -3376,22 +3386,13 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                     delete x.__docId;
                     return x
                 });
-                db.transactions = dedupeCloudRecords(transactions, 'transaction').map(x => {
-                    delete x.__docId;
-                    return x
-                });
-                db.purchases = dedupeCloudRecords(purchases, 'purchase').map(x => {
-                    delete x.__docId;
-                    return x
-                });
+                db.transactions = dedupeCloudRecords(transactions, 'transaction');
+                db.purchases = dedupeCloudRecords(purchases, 'purchase');
                 // Pertahankan __docId khusus pengeluaran agar edit/hapus selalu
                 // menyasar dokumen Firestore yang benar, termasuk dokumen legacy.
                 db.expenses = dedupeCloudRecords(expenses, 'expense');
-                db.cashLedger = cashLedger.map(x => { delete x.__docId; return x; });
-                db.stockMoves = dedupeCloudRecords(stockMoves, 'purchase').map(x => {
-                    delete x.__docId;
-                    return x
-                });
+                db.cashLedger = cashLedger;
+                db.stockMoves = dedupeCloudRecords(stockMoves, 'purchase');
                 db.stockPeriods = {};
                 stockPeriods.forEach(x => {
                     const id = x.__docId;
@@ -3409,6 +3410,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                 // Hindari menulis ulang seluruh periode ke Firebase setiap kali login.
                 recalculateStockPeriods();
                 await migrateUndefinedRecipes();
+                refreshFirestoreBaseline();
                 setCloudStatus('Tersinkron', true)
             } catch (e) {
                 console.error(e);
@@ -3539,6 +3541,93 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             return documentId;
         }
 
+        function cloneForFirestore(value) {
+            return JSON.parse(JSON.stringify(value ?? null));
+        }
+
+        function cleanFirestorePayload(item) {
+            const payload = { ...(item || {}) };
+            delete payload.__docId;
+            return payload;
+        }
+
+        function firestoreIdentity(name, item) {
+            const id = name === 'recipes'
+                ? (item.menuId ?? item.menuID ?? item.id)
+                : item.id;
+            const owner = name === 'transactions'
+                ? (item.cashierUid || item.createdByUid || '')
+                : (item.createdByUid || item.cashierUid || item.ownerUid || '');
+            return ['transactions', 'purchases', 'expenses', 'stock'].includes(name)
+                ? String(owner) + '__' + String(id)
+                : String(id);
+        }
+
+        function firestoreDocumentId(name, item, previousItem = null) {
+            if (previousItem?.__docId) return String(previousItem.__docId);
+            if (item?.__docId) return String(item.__docId);
+            const rawId = name === 'recipes'
+                ? (item.menuId ?? item.menuID ?? item.id)
+                : item.id;
+            if (rawId === undefined || rawId === null || String(rawId).trim() === '' || String(rawId) === 'undefined') {
+                throw new Error('ID dokumen ' + name + ' tidak valid.');
+            }
+            if (['transactions', 'purchases', 'expenses', 'stock'].includes(name)) {
+                const owner = name === 'transactions'
+                    ? (item.cashierUid || item.createdByUid || item.ownerUid || '')
+                    : (item.createdByUid || item.cashierUid || item.ownerUid || '');
+                if (!owner) throw new Error('UID pemilik data ' + name + ' tidak tersedia.');
+                return String(owner) + '__' + String(rawId);
+            }
+            return String(rawId);
+        }
+
+        function currentFirestoreSnapshot() {
+            return {
+                menus: cloneForFirestore(db.menus || []),
+                bahan: cloneForFirestore(db.bahan || []),
+                recipes: cloneForFirestore(db.recipes || []),
+                transactions: cloneForFirestore(db.transactions || []),
+                purchases: cloneForFirestore(db.purchases || []),
+                expenses: cloneForFirestore(db.expenses || []),
+                cashLedger: cloneForFirestore(db.cashLedger || []),
+                stock: cloneForFirestore(db.stockMoves || []),
+                stockPeriods: cloneForFirestore(db.stockPeriods || {}),
+                settings: cloneForFirestore(db.settings || {})
+            };
+        }
+
+        function refreshFirestoreBaseline() {
+            firestoreBaseline = currentFirestoreSnapshot();
+        }
+
+        function comparableFirestoreValue(value) {
+            const copy = cleanFirestorePayload(value);
+            return JSON.stringify(copy);
+        }
+
+        async function writeChangedArray(name, currentRows, previousRows) {
+            const previousByKey = new Map();
+            (previousRows || []).forEach(row => previousByKey.set(firestoreIdentity(name, row), row));
+            for (const item of (currentRows || [])) {
+                const key = firestoreIdentity(name, item);
+                const previous = previousByKey.get(key) || null;
+                if (previous && comparableFirestoreValue(previous) === comparableFirestoreValue(item)) continue;
+                const docId = firestoreDocumentId(name, item, previous);
+                await colRef(name).doc(docId).set(cleanFirestorePayload(item), { merge: true });
+            }
+        }
+
+        async function writeChangedStockPeriods(currentPeriods, previousPeriods) {
+            const before = previousPeriods || {};
+            for (const [docId, period] of Object.entries(currentPeriods || {})) {
+                if (before[docId] && JSON.stringify(before[docId]) === JSON.stringify(period)) continue;
+                const payload = { ...period };
+                delete payload.__docId;
+                await colRef('stockPeriods').doc(String(docId)).set(payload, { merge: true });
+            }
+        }
+
         async function syncFirebase(force = false) {
             if (!currentUser || !firebaseReady || !fbAuth?.currentUser || fbAuth.currentUser.uid !== currentUser.uid) {
                 setCloudStatus('Gagal — sesi Firebase tidak valid');
@@ -3548,50 +3637,58 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                 setCloudStatus('Gagal — tidak ada koneksi internet');
                 throw new Error('Koneksi internet diperlukan untuk menyimpan data.');
             }
-            if (force) setCloudStatus('Menyimpan langsung ke Firestore...');
+            if (!firestoreBaseline) refreshFirestoreBaseline();
+            if (force) setCloudStatus('Menyimpan perubahan ke Firestore...');
+            const before = firestoreBaseline;
             try {
-                // Setiap penyimpanan mengirim perubahan state ke Firestore secara langsung.
-                // Operasi hanya merge; tidak ada penghapusan koleksi/dokumen historis.
                 if (isAdminClient()) {
+                    // Admin hanya mengirim dokumen yang benar-benar berubah.
                     await Promise.all([
-                        writeArray('menus', db.menus, false),
-                        writeArray('bahan', db.bahan, false),
-                        writeArray('recipes', db.recipes, false),
-                        writeArray('transactions', db.transactions, false),
-                        writeArray('purchases', db.purchases, false),
-                        writeArray('expenses', db.expenses, false),
-                        writeArray('cashLedger', db.cashLedger || [], false),
-                        writeArray('stock', db.stockMoves, false),
-                        writeArray('stockPeriods', Object.entries(db.stockPeriods || {}).map(([id, v]) => ({ id, ...v })), false)
+                        writeChangedArray('menus', db.menus, before.menus),
+                        writeChangedArray('bahan', db.bahan, before.bahan),
+                        writeChangedArray('recipes', db.recipes, before.recipes),
+                        writeChangedArray('transactions', db.transactions, before.transactions),
+                        writeChangedArray('purchases', db.purchases, before.purchases),
+                        writeChangedArray('expenses', db.expenses, before.expenses),
+                        writeChangedArray('cashLedger', db.cashLedger || [], before.cashLedger),
+                        writeChangedArray('stock', db.stockMoves, before.stock),
+                        writeChangedStockPeriods(db.stockPeriods, before.stockPeriods),
+                        ...(JSON.stringify(db.settings || {}) !== JSON.stringify(before.settings || {})
+                            ? [fbFs.doc('toko/' + SHOP_ID + '/settings/profile').set(db.settings || {}, { merge: true })]
+                            : [])
                     ]);
-                    await fbFs.doc('toko/' + SHOP_ID + '/settings/profile').set(db.settings || {}, { merge: true });
                 } else if (isKasirClient()) {
+                    // Kasir hanya mengirim dokumen miliknya yang berubah. Data stok
+                    // bersama tetap dihitung dari transaksi dan pembelian toko yang dibaca.
                     await Promise.all([
-                        writeArray('transactions', db.transactions, false),
-                        writeArray('purchases', db.purchases, false),
-                        writeArray('expenses', db.expenses, false),
-                        writeArray('cashLedger', db.cashLedger || [], false)
+                        writeChangedArray('transactions', db.transactions, before.transactions),
+                        writeChangedArray('purchases', db.purchases, before.purchases),
+                        writeChangedArray('expenses', db.expenses, before.expenses),
+                        writeChangedArray('cashLedger', db.cashLedger || [], before.cashLedger)
                     ]);
                 } else {
                     throw new Error('Role akun tidak memiliki izin menyimpan data.');
                 }
+                refreshFirestoreBaseline();
                 setCloudStatus('Tersinkron', true);
                 return true;
             } catch (e) {
-                console.error('Penulisan langsung Firestore gagal:', e);
+                console.error('Penulisan perubahan Firestore gagal:', e);
                 setCloudStatus('Sinkron gagal');
-                toast('GAGAL menyimpan ke Firestore: ' + (e.message || 'Periksa koneksi dan Firestore Rules.'));
+                toast('GAGAL menyimpan perubahan ke Firestore: ' + (e.message || 'Periksa koneksi dan Firestore Rules.'));
                 throw e;
             }
         }
 
-        // Tidak ada antrean localStorage. Semua penyimpanan langsung menuju Firestore.
+        // Penyimpanan dijalankan berurutan agar dua perubahan cepat tidak saling
+        // menimpa snapshot pembanding. Tidak ada reload seluruh koleksi saat gagal.
         function save() {
             normalizeDb();
-            setCloudStatus('Menyimpan ke Firestore...');
-            return syncFirebase(true).catch(async (error) => {
-                // Jangan biarkan salinan gagal dianggap tersimpan. Ambil ulang data otoritatif dari Firestore.
-                try { await loadFirebaseData(); renderAll(); } catch (_) {}
+            setCloudStatus('Menyimpan perubahan...');
+            const task = firestoreSaveQueue.then(() => syncFirebase(true));
+            firestoreSaveQueue = task.catch(() => false);
+            return task.catch(error => {
+                console.error('save incremental:', error);
                 return false;
             });
         }
@@ -5546,6 +5643,7 @@ let pendingPurchaseBahanId = null;
                     db.nextId = Math.max(Number(db.nextId) || 1, Number(item.id) + 1);
                     db.expenses.push(savedItem);
                 }
+                refreshFirestoreBaseline();
                 setCloudStatus('Tersinkron', true);
                 closeModal();
                 renderAll();
@@ -6122,6 +6220,7 @@ let pendingPurchaseBahanId = null;
                 // cashLedger memakai ID asli, tidak memakai namespace koleksi transaksi.
                 await writeSingleRecord('cashLedger', row);
                 upsertCashLedger(row);
+                refreshFirestoreBaseline();
                 setCloudStatus('Tersinkron', true);
                 document.getElementById('cashEntryAmount').value = '';
                 document.getElementById('cashEntryNote').value = '';
