@@ -3342,38 +3342,28 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             }
             setCloudStatus('Menghubungkan...');
             try {
-                // Stok adalah milik bersama: baca transaksi/pembelian toko untuk kalkulasi stok,
-                // tetapi simpan data laporan kasir dalam array terpisah yang tetap terfilter.
+                // Hemat Reads: Admin memuat data toko untuk pengelolaan stok.
+                // Kasir hanya memuat dokumen miliknya; tidak mengunduh histori kasir lain.
                 const admin = isAdminClient();
                 const [
-                    menus, bahan, recipes,
-                    ownedTransactions, ownedPurchases, expenses,
-                    stockMoves, stockPeriods, settings,
-                    allStockTransactions, allStockPurchases, cashLedger
+                    menus, bahan, recipes, transactions, purchases, expenses,
+                    stockMoves, stockPeriods, settings, cashLedger
                 ] = await Promise.all([
                     readCollection('menus'),
                     readCollection('bahan'),
                     readCollection('recipes'),
-                    Promise.resolve(null),
-                    Promise.resolve(null),
+                    admin ? readCollection('transactions') : readOwnedCollection('transactions', 'cashierUid'),
+                    admin ? readCollection('purchases') : readOwnedCollection('purchases', 'createdByUid'),
                     admin ? readCollection('expenses') : readOwnedCollection('expenses', 'createdByUid'),
                     admin ? readCollection('stock') : Promise.resolve([]),
-                    readCollection('stockPeriods'),
+                    admin ? readCollection('stockPeriods') : Promise.resolve([]),
                     admin ? fbFs.doc('toko/' + SHOP_ID + '/settings/profile').get() : Promise.resolve({ exists: false }),
-                    readCollection('transactions'),
-                    readCollection('purchases'),
                     admin ? readCollection('cashLedger') : readOwnedCollection('cashLedger', 'ownerUid')
                 ]);
-                // Query transaksi/pembelian toko yang sama dipakai sekaligus untuk
-                // stok bersama dan data akun. Jangan jalankan query kedua khusus Kasir.
-                const transactions = admin ? allStockTransactions : allStockTransactions.filter(x =>
-                    String(x.cashierUid || x.createdByUid || '') === String(currentUser?.uid || '')
-                );
-                const purchases = admin ? allStockPurchases : allStockPurchases.filter(x =>
-                    String(x.createdByUid || x.cashierUid || '') === String(currentUser?.uid || '')
-                );
-                sharedStockTransactions = dedupeCloudRecords(allStockTransactions, 'transaction');
-                sharedStockPurchases = dedupeCloudRecords(allStockPurchases, 'purchase');
+                // Data bersama untuk kalkulasi stok hanya dimuat oleh Admin.
+                // Kasir tidak menghitung/mengubah stok dan hanya memakai data transaksi sendiri.
+                sharedStockTransactions = admin ? dedupeCloudRecords(transactions, 'transaction') : [];
+                sharedStockPurchases = admin ? dedupeCloudRecords(purchases, 'purchase') : [];
                 db.menus = menus.map(x => {
                     delete x.__docId;
                     return x
