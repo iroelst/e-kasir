@@ -3337,7 +3337,28 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             try {
                 // Stok adalah milik bersama: baca transaksi/pembelian toko untuk kalkulasi stok,
                 // tetapi simpan data laporan kasir dalam array terpisah yang tetap terfilter.
-                const [menus, bahan, recipes, transactions, purchases, expenses, stockMoves, stockPeriods, settings, allStockTransactions, allStockPurchases, cashLedger] = await Promise.all([readCollection('menus'), readCollection('bahan'), readCollection('recipes'), readOwnedCollection('transactions', 'cashierUid'), readOwnedCollection('purchases', 'createdByUid'), readOwnedCollection('expenses', 'createdByUid'), isAdminClient() ? readCollection('stock') : Promise.resolve([]), readCollection('stockPeriods'), isAdminClient() ? fbFs.doc('toko/' + SHOP_ID + '/settings/profile').get() : Promise.resolve({ exists: false }), readCollection('transactions'), readCollection('purchases'), isAdminClient() ? readCollection('cashLedger') : readOwnedCollection('cashLedger', 'ownerUid')]);
+                const admin = isAdminClient();
+                const [
+                    menus, bahan, recipes,
+                    ownedTransactions, ownedPurchases, expenses,
+                    stockMoves, stockPeriods, settings,
+                    allStockTransactions, allStockPurchases, cashLedger
+                ] = await Promise.all([
+                    readCollection('menus'),
+                    readCollection('bahan'),
+                    readCollection('recipes'),
+                    admin ? Promise.resolve(null) : readOwnedCollection('transactions', 'cashierUid'),
+                    admin ? Promise.resolve(null) : readOwnedCollection('purchases', 'createdByUid'),
+                    admin ? readCollection('expenses') : readOwnedCollection('expenses', 'createdByUid'),
+                    admin ? readCollection('stock') : Promise.resolve([]),
+                    readCollection('stockPeriods'),
+                    admin ? fbFs.doc('toko/' + SHOP_ID + '/settings/profile').get() : Promise.resolve({ exists: false }),
+                    readCollection('transactions'),
+                    readCollection('purchases'),
+                    admin ? readCollection('cashLedger') : readOwnedCollection('cashLedger', 'ownerUid')
+                ]);
+                const transactions = admin ? allStockTransactions : ownedTransactions;
+                const purchases = admin ? allStockPurchases : ownedPurchases;
                 sharedStockTransactions = dedupeCloudRecords(allStockTransactions, 'transaction').map(x => { delete x.__docId; return x; });
                 sharedStockPurchases = dedupeCloudRecords(allStockPurchases, 'purchase').map(x => { delete x.__docId; return x; });
                 db.menus = menus.map(x => {
@@ -3382,15 +3403,9 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                 db.nextId = Math.max(1, ...[].concat(db.menus, db.bahan, db.transactions, db.purchases, db.expenses, db.stockMoves).map(x => +x.id || 0)) + 1;
                 normalizeDb();
 
-                // Hitung ulang saldo bulanan berdasarkan data Firebase yang baru dimuat.
-                // Admin menyimpan hasil koreksi rantai stok agar konsisten di perangkat lain.
+                // Hitung ulang saldo bulanan di memori saat pemuatan.
+                // Hindari menulis ulang seluruh periode ke Firebase setiap kali login.
                 recalculateStockPeriods();
-                if (isAdminClient()) {
-                    await writeArray('stockPeriods', Object.entries(db.stockPeriods || {}).map(([id, value]) => ({
-                        id,
-                        ...value
-                    })), false);
-                }
                 localStorage.setItem(KEY, JSON.stringify(db));
                 await migrateUndefinedRecipes();
                 setCloudStatus('Tersinkron', true)
