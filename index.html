@@ -3207,14 +3207,31 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             ensureAdminUserManagement();
             renderAll();
             if (!navigator.onLine) setCloudStatus('Offline — data lokal');
-            if (navigator.onLine && localStorage.getItem('ekasir_pending_sync_' + currentUser.uid) === '1') {
-                await syncFirebase(true); // Kirim antrean lokal lebih dulu agar tidak tertimpa data cloud.
-            }
-            // Jika sinkronisasi masih gagal, pertahankan salinan lokal dan antreannya.
-            if (localStorage.getItem('ekasir_pending_sync_' + currentUser.uid) !== '1') {
-                await loadFirebaseData();
+            // Jangan menahan layar login sampai seluruh koleksi Firestore selesai dibaca.
+            // Tampilkan cache lokal terlebih dahulu, lalu perbarui dari Firebase di latar belakang.
+            // Jika ada antrean lokal, sinkronkan dahulu agar data lokal belum terkirim tidak tertimpa.
+            const hasPendingSync = navigator.onLine &&
+                localStorage.getItem('ekasir_pending_sync_' + currentUser.uid) === '1';
+            if (!navigator.onLine) {
+                setCloudStatus('Offline — data lokal');
             } else {
-                setCloudStatus(navigator.onLine ? 'Menunggu sinkronisasi' : 'Offline — data lokal');
+                setCloudStatus(hasPendingSync ? 'Menyinkronkan...' : 'Memperbarui data...');
+                (async () => {
+                    try {
+                        if (hasPendingSync) await syncFirebase(true);
+                        if (localStorage.getItem('ekasir_pending_sync_' + currentUser.uid) !== '1') {
+                            await loadFirebaseData();
+                            applyRoleAccess();
+                            ensureAdminUserManagement();
+                            renderAll();
+                        } else {
+                            setCloudStatus('Sinkronisasi tertunda — data lokal aman');
+                        }
+                    } catch (backgroundError) {
+                        console.error('Pembaruan data latar belakang:', backgroundError);
+                        setCloudStatus('Data lokal — sinkronisasi tertunda');
+                    }
+                })();
             }
             applyRoleAccess();
             ensureAdminUserManagement();
