@@ -3240,7 +3240,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
         // Hak akses menu berdasarkan role. Kasir dapat membuka Dashboard, Kasir, Pembelian, dan Laporan terbatas.
         function applyRoleAccess() {
             const kasir = isKasirClient();
-            const allowedKasirPages = ['dashboard', 'kasir', 'pembelian', 'pengeluaran', 'penjualan', 'laporan', 'keuangan'];
+            const allowedKasirPages = ['dashboard', 'kasir', 'pembelian', 'pengeluaran', 'penjualan', 'laporan', 'keuangan']; // Tidak termasuk menu/resep, stok, dan pengaturan.
             const openingTitle = document.getElementById('cashOpeningTitle');
             const openingHelp = document.getElementById('cashOpeningHelp');
             const entryTitle = document.getElementById('cashEntryTitle');
@@ -3266,7 +3266,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             const reportTitle = document.querySelector('#laporan .section-title h2');
             if (reportTitle) reportTitle.textContent = kasir ? 'Riwayat Transaksi & Omzet' : 'Laporan Berdasarkan Rentang Tanggal';
             const reportSubtitle = document.querySelector('#laporan .section-title small');
-            if (reportSubtitle) reportSubtitle.textContent = kasir ? 'Pilih periode untuk melihat riwayat transaksi dan omzet.' : 'Pilih periode lalu cetak atau simpan sebagai PDF.';
+            if (reportSubtitle) reportSubtitle.textContent = kasir ? 'Hanya menampilkan transaksi dan omzet yang dicatat oleh akun Anda.' : 'Pilih periode lalu cetak atau simpan sebagai PDF.';
         }
 
         function canAccessPage(page) {
@@ -4674,6 +4674,7 @@ let pendingPurchaseBahanId = null;
         }
 
         function changeStockRange() {
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengatur periode stok.');
             const r = getRange();
             if (r.from > r.to) return toast('Tanggal awal tidak boleh melewati tanggal akhir');
             ensurePeriod(rangeKey(r.from, r.to), r.from, r.to);
@@ -4682,6 +4683,7 @@ let pendingPurchaseBahanId = null;
         }
 
         function openOpeningModal() {
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengubah stok awal.');
             const r = getRange(),
                 key = rangeKey(r.from, r.to),
                 p = ensurePeriod(key, r.from, r.to);
@@ -4800,6 +4802,7 @@ let pendingPurchaseBahanId = null;
         }
 
         function saveOpening() {
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengubah stok awal.');
             const r = getRange(),
                 key = rangeKey(r.from, r.to),
                 p = ensurePeriod(key, r.from, r.to),
@@ -5301,6 +5304,7 @@ let pendingPurchaseBahanId = null;
         }
 
         function openBahanModal(id = null) {
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengelola data bahan.');
             let b = id ? db.bahan.find(x => x.id === id) : {
                 name: '',
                 unit: 'gram',
@@ -5323,10 +5327,12 @@ let pendingPurchaseBahanId = null;
         }
 
         function editBahan(id) {
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengelola data bahan.');
             openBahanModal(id)
         }
 
         function saveBahan(id) {
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengelola data bahan.');
             const old = id ? db.bahan.find(b => b.id === id) : null;
             const nameEl = document.getElementById('bName');
             const unitEl = document.getElementById('bUnit');
@@ -5438,6 +5444,7 @@ let pendingPurchaseBahanId = null;
         }
 
         function recalculateStockPeriods() {
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat menghitung ulang stok.');
             const startMonth = getStockStartMonth();
             const startDate = startMonth ? `${startMonth}-01` : '';
             const periods = Object.values(db.stockPeriods || {}).filter(p => {
