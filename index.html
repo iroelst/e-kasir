@@ -3503,20 +3503,17 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             if (!navigator.onLine) throw new Error('Koneksi internet diperlukan untuk menyimpan data.');
             const id = String(item?.id ?? '').trim();
             if (!id || id === 'undefined') throw new Error('ID data tidak valid.');
-            const ref = colRef(name);
             let documentId = id;
+            // Satu kali write langsung: tanpa .get() sebelum .set(). Ini mengurangi
+            // satu round-trip jaringan dan tidak memerlukan izin baca dokumen lama.
             if (['transactions', 'purchases', 'expenses', 'stock'].includes(name)) {
                 const ownerUid = String(name === 'transactions'
                     ? (item.cashierUid || item.createdByUid || item.ownerUid || '')
                     : (item.createdByUid || item.cashierUid || item.ownerUid || ''));
                 if (!ownerUid) throw new Error('UID pemilik data tidak tersedia.');
-                const namespacedId = ownerUid + '__' + id;
-                const legacy = await ref.doc(id).get();
-                const legacyOwner = legacy.exists
-                    ? String(legacy.data()?.createdByUid || legacy.data()?.cashierUid || legacy.data()?.ownerUid || '') : '';
-                documentId = legacy.exists && (!legacyOwner || legacyOwner === ownerUid) ? id : namespacedId;
+                documentId = ownerUid + '__' + id;
             }
-            await ref.doc(documentId).set(item, { merge: true });
+            await colRef(name).doc(documentId).set(item, { merge: true });
             return documentId;
         }
 
@@ -6059,7 +6056,7 @@ let pendingPurchaseBahanId = null;
             } else {
                 row = { id, type, date, amount, note, cashAccountType: a.type, cashAccountUid: a.type === 'admin' ? (currentUser?.uid || 'admin') : a.uid, ownerUid: currentUser?.uid || '', ownerName: a.name, createdByUid: currentUser?.uid || '', createdByName: a.name };
             }
-            const btn = document.querySelector('#cashEntryAmount')?.closest('.field, .form-grid, #modalBody')?.querySelector('button.btn.primary') || Array.from(document.querySelectorAll('button')).find(b => /Simpan.*Kas|Tambah Modal|Setor/i.test(b.textContent || ''));
+            const btn = Array.from(document.querySelectorAll('#cashEntryCard button.btn.primary')).find(b => /Simpan Transaksi Kas/i.test(b.textContent || ''));
             if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan ke Firestore...'; }
             setCloudStatus('Menyimpan transaksi kas...');
             try {
@@ -6075,7 +6072,7 @@ let pendingPurchaseBahanId = null;
             } catch (e) {
                 console.error('saveCashEntry Firestore:', e);
                 setCloudStatus('Sinkron gagal');
-                if (btn) { btn.disabled = false; btn.textContent = 'Simpan'; }
+                if (btn) { btn.disabled = false; btn.textContent = 'Simpan Transaksi Kas'; }
                 toast('Transaksi kas GAGAL disimpan: ' + (e?.code ? e.code + ' — ' : '') + (e?.message || 'Periksa Firestore Rules dan koneksi.'));
             }
         }
