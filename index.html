@@ -2689,6 +2689,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                     <div class="form-grid" style="margin:12px 0 14px;align-items:end">
                         <div class="field"><label>DARI TANGGAL</label><input id="expenseHistoryFrom" type="date" onchange="renderExpenses()"></div>
                         <div class="field"><label>SAMPAI TANGGAL</label><input id="expenseHistoryTo" type="date" onchange="renderExpenses()"></div>
+                        <div class="field"><label>CARI KATEGORI / KETERANGAN</label><input id="expenseSearch" type="search" placeholder="Contoh: listrik, gas, operasional" oninput="renderExpenses()"></div>
                         <div class="field"><button class="btn" type="button" onclick="resetExpenseHistoryRange()">Bulan Ini</button></div>
                     </div>
                     <div class="cards" style="margin-bottom:14px">
@@ -3383,10 +3384,9 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                     delete x.__docId;
                     return x
                 });
-                db.expenses = dedupeCloudRecords(expenses, 'expense').map(x => {
-                    delete x.__docId;
-                    return x
-                });
+                // Pertahankan __docId khusus pengeluaran agar edit/hapus selalu
+                // menyasar dokumen Firestore yang benar, termasuk dokumen legacy.
+                db.expenses = dedupeCloudRecords(expenses, 'expense');
                 db.cashLedger = cashLedger.map(x => { delete x.__docId; return x; });
                 db.stockMoves = dedupeCloudRecords(stockMoves, 'purchase').map(x => {
                     delete x.__docId;
@@ -3497,16 +3497,18 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
         }
         // Simpan satu dokumen saja untuk operasi kas/pengeluaran.
         // Tidak mengirim ulang seluruh koleksi yang mungkin berisi dokumen lama dengan Rules berbeda.
-        async function writeSingleRecord(name, item) {
+        async function writeSingleRecord(name, item, preferredDocumentId = '') {
             if (!currentUser || !firebaseReady || !fbAuth?.currentUser || fbAuth.currentUser.uid !== currentUser.uid)
                 throw new Error('Sesi Firebase tidak valid. Login kembali.');
             if (!navigator.onLine) throw new Error('Koneksi internet diperlukan untuk menyimpan data.');
             const id = String(item?.id ?? '').trim();
             if (!id || id === 'undefined') throw new Error('ID data tidak valid.');
             let documentId = id;
-            // Satu kali write langsung: tanpa .get() sebelum .set(). Ini mengurangi
-            // satu round-trip jaringan dan tidak memerlukan izin baca dokumen lama.
-            if (['transactions', 'purchases', 'expenses', 'stock'].includes(name)) {
+            // Saat edit, gunakan ID dokumen asal agar data legacy tidak terduplikasi.
+            if (preferredDocumentId) {
+                documentId = String(preferredDocumentId);
+            // Dokumen baru memakai namespace UID agar ID antar kasir tidak bertabrakan.
+            } else if (['transactions', 'purchases', 'expenses', 'stock'].includes(name)) {
                 const ownerUid = String(name === 'transactions'
                     ? (item.cashierUid || item.createdByUid || item.ownerUid || '')
                     : (item.createdByUid || item.cashierUid || item.ownerUid || ''));
@@ -4773,7 +4775,12 @@ let pendingPurchaseBahanId = null;
                 expenseHistoryCount.textContent = '0'; expenseHistoryTotal.textContent = rupiah(0);
                 return;
             }
-            const ownExpenses = db.expenses.filter(e => recordBelongsToCurrentUser(e, 'expense') && inRange(e.date, r.from, r.to));
+            const keyword = String(document.getElementById('expenseSearch')?.value || '').trim().toLocaleLowerCase('id-ID');
+            const ownExpenses = db.expenses.filter(e =>
+                recordBelongsToCurrentUser(e, 'expense') &&
+                inRange(e.date, r.from, r.to) &&
+                (!keyword || `${e.cat || ''} ${e.note || ''}`.toLocaleLowerCase('id-ID').includes(keyword))
+            );
             expenseHistoryCount.textContent = ownExpenses.length.toLocaleString('id-ID');
             expenseHistoryTotal.textContent = rupiah(ownExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0));
             expenseTable.innerHTML = ownExpenses.slice().sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')) || (+b.id||0)-(+a.id||0)).map(e => {
@@ -5502,49 +5509,81 @@ let pendingPurchaseBahanId = null;
             const date = document.getElementById('eDate')?.value || today();
             const cat = (document.getElementById('eCat')?.value || '').trim();
             const note = (document.getElementById('eNote')?.value || '').trim();
-            const amount = +(document.getElementById('eAmount')?.value || 0);
-            if (!date) return toast('Tanggal wajib diisi');
-            if (!cat) return toast('Kategori wajib diisi');
+            const amountRaw = document.getElementById('eAmount')?.value;
+            const amount = amountRaw === '' || amountRaw == null ? NaN : Number(amountRaw);
+            if (!date) return toast('Tanggal wajib diisi.');
+            if (!cat) return toast('Kategori wajib diisi.');
             if (!Number.isFinite(amount) || amount <= 0) return toast('Masukkan jumlah yang valid dan lebih dari 0.');
+            if (!currentUser?.uid) return toast('Sesi pengguna tidak valid. Silakan login kembali.');
+
             const existing = editId ? db.expenses.find(x => String(x.id) === String(editId) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid))) : null;
-            if (editId && !existing) return toast('Data pengeluaran tidak ditemukan.');
+            if (editId && !existing) return toast('Data pengeluaran tidak ditemukan. Muat ulang data lalu coba lagi.');
             if (existing && !recordBelongsToCurrentUser(existing, 'expense')) return toast('Anda hanya dapat mengubah pengeluaran milik akun sendiri.');
-            const uid = String(existing?.createdByUid || existing?.cashierUid || currentUser?.uid || '');
-            const item = { id: editId || db.nextId, date, cat, note, amount,
+
+            const uid = String(existing?.createdByUid || existing?.cashierUid || currentUser.uid);
+            const item = {
+                id: editId || db.nextId,
+                date, cat, note, amount,
                 cashAccountType: existing?.cashAccountType || (isKasirClient() ? 'kasir' : 'admin'),
-                cashAccountUid: existing?.cashAccountUid || currentUser?.uid || '',
+                cashAccountUid: existing?.cashAccountUid || currentUser.uid,
                 ownerUid: existing?.ownerUid || uid,
                 createdByUid: uid,
-                createdByName: existing?.createdByName || existing?.cashierName || currentUserName || currentUser?.displayName || 'User' };
+                createdByName: existing?.createdByName || existing?.cashierName || currentUserName || currentUser.displayName || 'User'
+            };
             const btn = document.querySelector('#modalBody button.btn.primary');
             if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan ke Firestore...'; }
             setCloudStatus('Menyimpan pengeluaran...');
             try {
-                await writeSingleRecord('expenses', item);
-                if (editId) db.expenses = db.expenses.map(x => String(x.id) === String(editId) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid)) ? item : x);
-                else { db.nextId = Math.max(Number(db.nextId) || 1, Number(item.id) + 1); db.expenses.push(item); }
+                const documentId = await writeSingleRecord('expenses', item, existing?.__docId || '');
+                const savedItem = { ...item, __docId: documentId };
+                if (editId) {
+                    db.expenses = db.expenses.map(x =>
+                        String(x.id) === String(editId) &&
+                        String(x.createdByUid || x.cashierUid || '') === uid
+                            ? savedItem : x
+                    );
+                } else {
+                    db.nextId = Math.max(Number(db.nextId) || 1, Number(item.id) + 1);
+                    db.expenses.push(savedItem);
+                }
                 setCloudStatus('Tersinkron', true);
                 closeModal();
                 renderAll();
-                toast(editId ? 'Pengeluaran berhasil disimpan ke Firestore.' : 'Pengeluaran tersimpan di Firestore.');
+                toast(editId ? 'Pengeluaran berhasil diperbarui di Firestore.' : 'Pengeluaran berhasil disimpan di Firestore.');
             } catch (e) {
                 console.error('saveExpense Firestore:', e);
                 setCloudStatus('Sinkron gagal');
                 if (btn) { btn.disabled = false; btn.textContent = editId ? 'Simpan Perubahan' : 'Simpan'; }
-                toast('Pengeluaran GAGAL disimpan: ' + (e?.code ? e.code + ' — ' : '') + (e?.message || 'Periksa Firestore Rules dan koneksi.'));
+                toast('Pengeluaran gagal disimpan: ' + (e?.code ? e.code + ' — ' : '') + (e?.message || 'Periksa koneksi dan Firestore Rules.'));
             }
         }
 
-        function deleteExpense(id, ownerUid = '') {
+        async function deleteExpense(id, ownerUid = '') {
             if (!isAdminClient() && !isKasirClient()) return toast('Akses menghapus pengeluaran tidak diizinkan.');
             const e = db.expenses.find(x => String(x.id) === String(id) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid)));
             if (!e) return toast('Data pengeluaran tidak ditemukan.');
             if (!recordBelongsToCurrentUser(e, 'expense')) return toast('Anda hanya dapat menghapus pengeluaran milik akun sendiri.');
-            if (confirm(`Hapus pengeluaran ${rupiah(e.amount)} — ${e.note || e.cat}? Data ini juga akan hilang dari laporan terkait.`)) {
-                db.expenses = db.expenses.filter(x => !(String(x.id) === String(id) && String(x.createdByUid || x.cashierUid || '') === String(e.createdByUid || e.cashierUid || '')));
-                save();
+            if (!currentUser?.uid || !firebaseReady || !fbAuth?.currentUser || fbAuth.currentUser.uid !== currentUser.uid)
+                return toast('Sesi Firebase tidak valid. Login kembali sebelum menghapus.');
+            if (!navigator.onLine) return toast('Koneksi internet diperlukan untuk menghapus pengeluaran.');
+            if (!confirm(`Hapus pengeluaran ${rupiah(e.amount)} — ${e.note || e.cat}? Data ini juga akan hilang dari laporan terkait.`)) return;
+
+            try {
+                // Gunakan ID dokumen aktual. Fallback namespace berlaku untuk data
+                // baru yang belum memiliki metadata __docId di memori.
+                const documentId = String(e.__docId || ((e.createdByUid || e.cashierUid || '') + '__' + e.id));
+                await colRef('expenses').doc(documentId).delete();
+                db.expenses = db.expenses.filter(x => !(
+                    String(x.id) === String(id) &&
+                    String(x.createdByUid || x.cashierUid || '') === String(e.createdByUid || e.cashierUid || '')
+                ));
+                setCloudStatus('Tersinkron', true);
                 renderAll();
-                toast('Pengeluaran dihapus.');
+                toast('Pengeluaran berhasil dihapus dari Firestore.');
+            } catch (err) {
+                console.error('deleteExpense Firestore:', err);
+                setCloudStatus('Sinkron gagal');
+                toast('Penghapusan pengeluaran gagal: ' + (err?.code ? err.code + ' — ' : '') + (err?.message || 'Periksa koneksi dan Firestore Rules.'));
             }
         }
 
