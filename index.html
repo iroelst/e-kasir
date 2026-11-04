@@ -3292,8 +3292,40 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
         async function readOwnedCollection(name, ownerField) {
             if (isAdminClient()) return readCollection(name);
             if (!isKasirClient() || !currentUser?.uid) return [];
-            const snap = await colRef(name).where(ownerField, '==', currentUser.uid).get();
-            return snap.docs.map(d => ({ __docId: d.id, ...d.data() }));
+            const ref = colRef(name);
+            const docs = new Map();
+            const primary = await ref.where(ownerField, '==', currentUser.uid).get();
+            primary.docs.forEach(d => docs.set(d.id, { __docId: d.id, ...d.data() }));
+            // Compatibilidad con registros antiguos que guardaban el UID en el campo alternativo.
+            const alternateField = ownerField === 'cashierUid' ? 'createdByUid'
+                : ownerField === 'createdByUid' ? 'cashierUid' : 'createdByUid';
+            if (alternateField !== ownerField) {
+                try {
+                    const alternate = await ref.where(alternateField, '==', currentUser.uid).get();
+                    alternate.docs.forEach(d => docs.set(d.id, { __docId: d.id, ...d.data() }));
+                } catch (e) {
+                    // Rules lama mungkin hanya mengizinkan query pada ownerField utama.
+                    console.warn('Query kompatibilitas ' + name + '.' + alternateField + ' dilewati:', e?.code || e?.message || e);
+                }
+            }
+            return [...docs.values()];
+        }
+        function dedupeCloudRecords(rows, kind) {
+            const ownerOf = row => String(kind === 'transaction'
+                ? (row.cashierUid || row.createdByUid || '')
+                : (row.createdByUid || row.cashierUid || ''));
+            const map = new Map();
+            (rows || []).forEach(row => {
+                const id = row?.id;
+                const owner = ownerOf(row || {});
+                const key = (id !== undefined && id !== null && String(id) !== '')
+                    ? (owner ? owner + '__' + String(id) : 'legacy__' + String(row.__docId || id))
+                    : String(row?.__docId || '');
+                const preferredDocId = owner && id !== undefined && id !== null ? owner + '__' + String(id) : '';
+                const existing = map.get(key);
+                if (!existing || (preferredDocId && String(row.__docId || '') === preferredDocId)) map.set(key, row);
+            });
+            return [...map.values()];
         }
         async function loadFirebaseData() {
             if (!currentUser || !firebaseReady) return;
@@ -3306,8 +3338,8 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                 // Stok adalah milik bersama: baca transaksi/pembelian toko untuk kalkulasi stok,
                 // tetapi simpan data laporan kasir dalam array terpisah yang tetap terfilter.
                 const [menus, bahan, recipes, transactions, purchases, expenses, stockMoves, stockPeriods, settings, allStockTransactions, allStockPurchases, cashLedger] = await Promise.all([readCollection('menus'), readCollection('bahan'), readCollection('recipes'), readOwnedCollection('transactions', 'cashierUid'), readOwnedCollection('purchases', 'createdByUid'), readOwnedCollection('expenses', 'createdByUid'), isAdminClient() ? readCollection('stock') : Promise.resolve([]), readCollection('stockPeriods'), isAdminClient() ? fbFs.doc('toko/' + SHOP_ID + '/settings/profile').get() : Promise.resolve({ exists: false }), readCollection('transactions'), readCollection('purchases'), isAdminClient() ? readCollection('cashLedger') : readOwnedCollection('cashLedger', 'ownerUid')]);
-                sharedStockTransactions = allStockTransactions.map(x => { delete x.__docId; return x; });
-                sharedStockPurchases = allStockPurchases.map(x => { delete x.__docId; return x; });
+                sharedStockTransactions = dedupeCloudRecords(allStockTransactions, 'transaction').map(x => { delete x.__docId; return x; });
+                sharedStockPurchases = dedupeCloudRecords(allStockPurchases, 'purchase').map(x => { delete x.__docId; return x; });
                 db.menus = menus.map(x => {
                     delete x.__docId;
                     return x
@@ -3320,15 +3352,15 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                     delete x.__docId;
                     return x
                 });
-                db.transactions = transactions.map(x => {
+                db.transactions = dedupeCloudRecords(transactions, 'transaction').map(x => {
                     delete x.__docId;
                     return x
                 });
-                db.purchases = purchases.map(x => {
+                db.purchases = dedupeCloudRecords(purchases, 'purchase').map(x => {
                     delete x.__docId;
                     return x
                 });
-                db.expenses = expenses.map(x => {
+                db.expenses = dedupeCloudRecords(expenses, 'expense').map(x => {
                     delete x.__docId;
                     return x
                 });
@@ -3407,7 +3439,16 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                 }
                 const id = String(rawId);
                 wanted.add(id);
-                await ref.doc(id).set(item, {
+                // ID lokal dapat sama pada dua akun kasir. Simpan transaksi,
+                // pembelian, dan pengeluaran pada namespace pemilik agar tidak saling menimpa.
+                let documentId = id;
+                if (['transactions', 'purchases', 'expenses'].includes(name)) {
+                    const ownerUid = String(name === 'transactions'
+                        ? (item.cashierUid || item.createdByUid || '')
+                        : (item.createdByUid || item.cashierUid || ''));
+                    if (ownerUid) documentId = ownerUid + '__' + id;
+                }
+                await ref.doc(documentId).set(item, {
                     merge: true
                 })
             }
@@ -3663,7 +3704,8 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             // Gabungkan data bersama dari cloud dengan transaksi lokal terbaru yang belum tersinkron.
             const byId = new Map();
             [...(sharedStockTransactions || []), ...(db.transactions || [])].forEach(t => {
-                const key = String(t.id ?? (t.cashierUid + '_' + t.date + '_' + t.time));
+                const owner = String(t.cashierUid || t.createdByUid || 'legacy');
+                const key = owner + '__' + String(t.id ?? (t.date + '_' + t.time));
                 byId.set(key, t);
             });
             return [...byId.values()].filter(t => inRange(t.date, from, to));
@@ -3672,7 +3714,8 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
         function stockPurchases(from, to) {
             const byId = new Map();
             [...(sharedStockPurchases || []), ...(db.purchases || [])].forEach(p => {
-                const key = String(p.id ?? (p.createdByUid + '_' + p.date + '_' + p.bahanId));
+                const owner = String(p.createdByUid || p.cashierUid || 'legacy');
+                const key = owner + '__' + String(p.id ?? (p.date + '_' + p.bahanId));
                 byId.set(key, p);
             });
             return [...byId.values()].filter(m => m.type === 'purchase' && inRange(m.date, from, to));
@@ -3687,23 +3730,30 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
 
         function recipeItemParts(item) {
             if (Array.isArray(item)) return {
+                bahanId: null,
                 name: item[0],
                 qty: +item[1] || 0
             };
-            const b = db.bahan.find(x => x.id === item?.bahanId);
+            const rawId = item?.bahanId ?? item?.bahanID ?? item?.ingredientId;
+            const b = db.bahan.find(x => String(x.id) === String(rawId ?? ''));
             return {
-                name: b?.name || item?.name || '',
-                qty: +item?.qty || 0
+                bahanId: b?.id ?? rawId ?? null,
+                name: b?.name || item?.name || item?.bahan || '',
+                qty: +((item?.qty ?? item?.jumlah ?? item?.quantity) || 0)
             }
         }
 
         function usageForRange(b, from, to) {
             let used = 0;
             stockTransactions(from, to).forEach(t => (t.items || []).forEach(it => {
-                let r = db.recipes.find(x => x.menuId === it.id);
+                let r = db.recipes.find(x => String(x.menuId ?? x.menuID ?? x.menu_id ?? '') === String(it.id));
                 if (r) r.items.forEach(item => {
                     const z = recipeItemParts(item);
-                    if (z.name === b.name) used += z.qty * (+it.qty || 0)
+                    const idExists = z.bahanId !== null && z.bahanId !== undefined &&
+                        db.bahan.some(ingredient => String(ingredient.id) === String(z.bahanId));
+                    const matchesId = idExists && String(z.bahanId) === String(b.id);
+                    const matchesLegacyName = !idExists && String(z.name).trim().toLowerCase() === String(b.name).trim().toLowerCase();
+                    if (matchesId || matchesLegacyName) used += z.qty * (+it.qty || 0);
                 })
             }));
             return used
@@ -3713,7 +3763,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             const key = rangeKey(from, to),
                 p = ensurePeriod(key, from, to),
                 opening = +(p.opening[b.id] ?? 0),
-                purchases = stockPurchases(from, to).filter(x => x.bahanId === b.id).reduce((a, x) => a + (+x.qty || 0), 0),
+                purchases = stockPurchases(from, to).filter(x => String(x.bahanId) === String(b.id)).reduce((a, x) => a + (+x.qty || 0), 0),
                 used = usageForRange(b, from, to),
                 ending = opening + purchases - used;
             p.ending[b.id] = ending;
@@ -3749,9 +3799,14 @@ let pendingPurchaseBahanId = null;
 
         function recipeCost(items, asOf = today()) {
             return (items || []).reduce((sum, item) => {
-                const bahan = db.bahan.find(b => b.id === +item.bahanId);
+                const part = recipeItemParts(item);
+                // ID bahan dapat tersimpan sebagai angka atau teks pada data lama.
+                // Untuk resep legacy berbasis nama, gunakan nama hanya bila ID tidak cocok.
+                const bahan = (part.bahanId !== null && part.bahanId !== undefined
+                    ? db.bahan.find(b => String(b.id) === String(part.bahanId))
+                    : null) || db.bahan.find(b => String(b.name || '').trim().toLowerCase() === String(part.name || '').trim().toLowerCase());
                 if (!bahan) return sum;
-                return sum + averageUnitCost(bahan, asOf) * (+item.qty || 0);
+                return sum + averageUnitCost(bahan, asOf) * (+part.qty || 0);
             }, 0);
         }
 
@@ -3906,7 +3961,8 @@ let pendingPurchaseBahanId = null;
                 const status = t.status || 'lunas';
                 const cls = status === 'lunas' ? 'status-paid' : status === 'sebagian' ? 'status-partial' : 'status-unpaid';
                 const label = status === 'lunas' ? 'Lunas' : status === 'sebagian' ? 'Belum Lunas' : 'Belum Bayar';
-                return `<div class="cart-item"><div><b>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</b><small style="display:block;color:var(--muted)">${t.time} · ${t.pay} · <span class="badge ${cls}">${label}</span></small></div><div style="display:flex;align-items:center;gap:8px"><b>${rupiah(t.total)}</b><button class="btn no-print" onclick="printThermal(${t.id},80)">🧾</button></div></div>`;
+                const ownerUid = String(t.cashierUid || t.createdByUid || '').replace(/[^A-Za-z0-9_-]/g, '');
+                return `<div class="cart-item"><div><b>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</b><small style="display:block;color:var(--muted)">${t.time} · ${t.pay} · <span class="badge ${cls}">${label}</span></small></div><div style="display:flex;align-items:center;gap:8px"><b>${rupiah(t.total)}</b><button class="btn no-print" onclick="printThermal('${t.id}',80,'${ownerUid}')">🧾</button></div></div>`;
             }).join('') : '<div class="empty">Belum ada transaksi hari ini.</div>'
         }
 
@@ -3990,18 +4046,23 @@ let pendingPurchaseBahanId = null;
                 : defaultStockRange;
             const need = {};
             cart.forEach(it => {
-                const r = db.recipes.find(x => x.menuId === it.id);
-                if (r) r.items.forEach(item => {
-                    const z = recipeItemParts(item);
-                    if (z.name) need[z.name] = (need[z.name] || 0) + z.qty * (+it.qty || 0);
+                const r = db.recipes.find(x => String(x.menuId ?? x.menuID ?? x.menu_id ?? '') === String(it.id));
+                if (r) (r.items || r.recipe || r.bahan || []).forEach(item => {
+                    const part = recipeItemParts(item);
+                    const bahan = (part.bahanId !== null && part.bahanId !== undefined
+                        ? db.bahan.find(x => String(x.id) === String(part.bahanId))
+                        : null) || db.bahan.find(x => String(x.name || '').trim().toLowerCase() === String(part.name || '').trim().toLowerCase());
+                    if (!bahan) return;
+                    const key = String(bahan.id);
+                    need[key] = (need[key] || 0) + (+part.qty || 0) * (+it.qty || 0);
                 });
             });
 
-            for (const name in need) {
-                const b = db.bahan.find(x => x.name === name);
+            for (const bahanId of Object.keys(need)) {
+                const b = db.bahan.find(x => String(x.id) === bahanId);
                 if (!b) continue;
                 const avail = stockSummary(b, rr.from, rr.to).ending;
-                if (avail < need[name] - 1e-9) return toast(`Stok ${name} tidak cukup`);
+                if (avail < need[bahanId] - 1e-9) return toast(`Stok ${b.name} tidak cukup`);
             }
 
             const total = cart.reduce((a, i) => a + i.price * i.qty, 0);
@@ -4024,31 +4085,38 @@ let pendingPurchaseBahanId = null;
             openPaymentModal();
         }
 
-        function openPaymentModal(existingId = null) {
+        function findTransactionRecord(id, ownerUid = '') {
+            return (db.transactions || []).find(x => String(x.id) === String(id) &&
+                (!ownerUid || String(x.cashierUid || x.createdByUid || '') === String(ownerUid)));
+        }
+
+        function openPaymentModal(existingId = null, ownerUid = '') {
             let source;
             if (existingId) {
-                const t = db.transactions.find(x => x.id === existingId);
+                const t = findTransactionRecord(existingId, ownerUid);
                 if (!t) return toast('Transaksi tidak ditemukan');
                 pendingCheckout = {
                     existingId: t.id,
+                    existingOwnerUid: String(t.cashierUid || t.createdByUid || ownerUid || ''),
                     items: t.items.map(i => ({...i})),
                     total: +t.total || 0,
                     hpp: +t.hpp || 0,
                     pay: t.pay || 'Tunai',
-                    originalPaid: +t.paidAmount || 0
+                    originalPaid: getNetPaidAmount(t)
                 };
             }
             source = pendingCheckout;
             if (!source) return;
 
             const currentPaid = Math.max(0, +source.originalPaid || 0);
-            const defaultPaid = currentPaid || (source.pay === 'Tunai' ? '' : source.total);
+            const defaultPaid = existingId ? '' : (source.pay === 'Tunai' ? '' : source.total);
+            const remainingDue = Math.max(0, (+source.total || 0) - currentPaid);
 
             openModal(existingId ? 'Selesaikan Pembayaran' : 'Pembayaran Transaksi', `
                 <div class="payment-modal">
                     <div class="payment-total">
                         <small>TOTAL YANG HARUS DIBAYAR</small>
-                        <strong id="paymentTotal">${rupiah(source.total)}</strong>
+                        <strong id="paymentTotal">${rupiah(existingId ? remainingDue : source.total)}</strong>
                     </div>
 
                     <div>
@@ -4061,7 +4129,7 @@ let pendingPurchaseBahanId = null;
                     </div>
 
                     <div class="payment-field">
-                        <label>NOMINAL DIBAYAR</label>
+                        <label>${existingId ? 'NOMINAL PEMBAYARAN TAMBAHAN' : 'NOMINAL DIBAYAR'}</label>
                         <input id="paymentAmount" class="payment-input" type="number" inputmode="numeric" min="0" step="1" value="${defaultPaid}" placeholder="Masukkan nominal" oninput="updatePaymentChange()">
                     </div>
 
@@ -4094,7 +4162,7 @@ let pendingPurchaseBahanId = null;
             const hint = document.getElementById('paymentHint');
             const label = document.getElementById('paymentChangeLabel');
             if (method !== 'Tunai') {
-                if (input && !+input.value) input.value = pendingCheckout.total;
+                if (input && !+input.value) input.value = Math.max(0, (+pendingCheckout.total || 0) - (+pendingCheckout.originalPaid || 0));
                 if (hint) hint.textContent = `Jika ${method} belum diterima, pilih “Belum Bayar”.`;
                 if (label) label.textContent = 'Status pembayaran';
             } else {
@@ -4108,18 +4176,21 @@ let pendingPurchaseBahanId = null;
             if (!pendingCheckout) return;
             const amount = Math.max(0, +(document.getElementById('paymentAmount')?.value || 0));
             const total = +pendingCheckout.total || 0;
+            const due = pendingCheckout.existingId
+                ? Math.max(0, total - Math.max(0, +pendingCheckout.originalPaid || 0))
+                : total;
             const box = document.getElementById('paymentChangeBox');
             const value = document.getElementById('paymentChange');
             const label = document.getElementById('paymentChangeLabel');
             if (!box || !value) return;
 
             if (pendingCheckout.pay === 'Tunai') {
-                const change = amount - total;
+                const change = amount - due;
                 label.textContent = change >= 0 ? 'Kembalian' : 'Kurang Bayar';
                 value.textContent = rupiah(Math.abs(change));
                 box.classList.toggle('negative', change < 0);
             } else {
-                const remaining = Math.max(0, total - amount);
+                const remaining = Math.max(0, due - amount);
                 label.textContent = remaining > 0 ? 'Sisa Tagihan' : 'Status pembayaran';
                 value.textContent = remaining > 0 ? rupiah(remaining) : 'Lunas';
                 box.classList.toggle('negative', remaining > 0);
@@ -4138,33 +4209,74 @@ let pendingPurchaseBahanId = null;
                 pay: pendingCheckout.pay || 'Tunai',
                 paidAmount: Math.max(0, +paidAmount || 0),
                 change: Math.max(0, +change || 0),
+                payments: (+paidAmount || 0) > 0 ? [{ method: pendingCheckout.pay || 'Tunai', amount: Math.max(0, +paidAmount || 0), change: Math.max(0, +change || 0), date: pendingCheckout.date || today(), time: d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) }] : [],
+                paymentVersion: 2,
                 status: status,
                 cashierUid: currentUser?.uid || '',
                 cashierName: currentUserName || currentUser?.displayName || (currentUser?.email ? currentUser.email.split('@')[0] : '') || (isAdminClient() ? 'Admin' : 'Kasir')
             };
             db.transactions.push(record);
-            sharedStockTransactions = [...(sharedStockTransactions || []).filter(x => String(x.id) !== String(record.id)), record];
+            sharedStockTransactions = [...(sharedStockTransactions || []).filter(x => !(String(x.id) === String(record.id) && String(x.cashierUid || x.createdByUid || '') === String(record.cashierUid || record.createdByUid || ''))), record];
             save();
             return record;
         }
 
+        function getNetPaidAmount(transaction) {
+            if (Array.isArray(transaction?.payments)) {
+                return transaction.payments.reduce((sum, payment) => sum + Math.max(0, Number(payment.amount) || 0), 0);
+            }
+            const paid = Math.max(0, Number(transaction?.paidAmount) || 0);
+            // Legacy records stored the cash tender (including change) in paidAmount.
+            const method = String(transaction?.pay || 'Tunai').toLowerCase();
+            return Number(transaction?.paymentVersion) >= 2 || !method.includes('tunai')
+                ? paid
+                : Math.max(0, paid - Math.max(0, Number(transaction?.change) || 0));
+        }
+
+        function getCashPaidAmount(transaction) {
+            if (Array.isArray(transaction?.payments)) {
+                return transaction.payments.reduce((sum, payment) =>
+                    sum + (String(payment.method || '').toLowerCase().includes('tunai') ? Math.max(0, Number(payment.amount) || 0) : 0), 0);
+            }
+            const method = String(transaction?.pay || 'Tunai').toLowerCase();
+            return method.includes('tunai') ? getNetPaidAmount(transaction) : 0;
+        }
+
         function confirmCheckoutPayment() {
             if (!pendingCheckout) return;
-            const amount = Math.max(0, +(document.getElementById('paymentAmount')?.value || 0));
-            const total = +pendingCheckout.total || 0;
-
-            if (pendingCheckout.pay === 'Tunai' && amount < total) {
-                return toast(`Nominal tunai masih kurang ${rupiah(total - amount)}`);
+            const entered = Number(document.getElementById('paymentAmount')?.value || 0);
+            if (!Number.isFinite(entered) || entered <= 0) return toast('Masukkan nominal pembayaran yang valid.');
+            const total = Math.max(0, Number(pendingCheckout.total) || 0);
+            const previous = pendingCheckout.existingId
+                ? getNetPaidAmount(findTransactionRecord(pendingCheckout.existingId, pendingCheckout.existingOwnerUid || ''))
+                : 0;
+            const due = Math.max(0, total - previous);
+            if (due <= 0) return toast('Transaksi ini sudah lunas.');
+            const isCash = pendingCheckout.pay === 'Tunai';
+            if (isCash && entered < due) {
+                return toast(`Nominal tunai masih kurang ${rupiah(due - entered)}`);
+            }
+            if (!isCash && entered > due) {
+                return toast(`Nominal pembayaran tidak boleh melebihi sisa tagihan ${rupiah(due)}.`);
             }
 
+            const applied = Math.min(entered, due);
+            const change = isCash ? Math.max(0, entered - due) : 0;
+
             if (pendingCheckout.existingId) {
-                const t = db.transactions.find(x => x.id === pendingCheckout.existingId);
+                const t = findTransactionRecord(pendingCheckout.existingId, pendingCheckout.existingOwnerUid || '');
                 if (!t) return toast('Transaksi tidak ditemukan');
-                const previous = +t.paidAmount || 0;
-                const newPaid = previous + amount;
-                t.paidAmount = newPaid;
-                t.status = newPaid >= total ? 'lunas' : newPaid > 0 ? 'sebagian' : 'belum bayar';
-                t.change = t.pay === 'Tunai' ? Math.max(0, newPaid - total) : 0;
+                const previousChange = Number(t.change) || 0;
+                const paymentHistory = Array.isArray(t.payments) ? t.payments.slice() :
+                    (previous > 0 ? [{ method: t.pay || 'Tunai', amount: previous, change: previousChange, date: t.date || today(), time: t.time || '' }] : []);
+                if (applied > 0) paymentHistory.push({ method: pendingCheckout.pay || t.pay || 'Tunai', amount: applied, change, date: today(), time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) });
+                t.payments = paymentHistory;
+                t.paidAmount = previous + applied;
+                t.change = previousChange + change;
+                const methods = [...new Set(paymentHistory.map(x => String(x.method || 'Tunai')))];
+                t.pay = methods.length > 1 ? 'Campuran' : (methods[0] || t.pay || 'Tunai');
+                t.paymentVersion = 2;
+                t.status = t.paidAmount >= total ? 'lunas' : t.paidAmount > 0 ? 'sebagian' : 'belum bayar';
                 save();
                 const done = t.status === 'lunas';
                 closeModal();
@@ -4176,54 +4288,69 @@ let pendingPurchaseBahanId = null;
                 return;
             }
 
-            const change = pendingCheckout.pay === 'Tunai' ? Math.max(0, amount - total) : 0;
-            const record = saveCheckoutRecord('lunas', amount, change);
+            const status = applied >= total ? 'lunas' : applied > 0 ? 'sebagian' : 'belum bayar';
+            const record = saveCheckoutRecord(status, applied, change);
             closeModal();
             pendingCheckout = null;
             cart = [];
             renderAll();
-            openPaymentSuccess(record);
+            if (status === 'lunas') openPaymentSuccess(record);
+            else toast(`Pembayaran tersimpan. Sisa tagihan ${rupiah(total - applied)}`);
         }
 
         function saveUnpaidCheckout() {
             if (!pendingCheckout) return;
-            const amount = Math.max(0, +(document.getElementById('paymentAmount')?.value || 0));
-            const total = +pendingCheckout.total || 0;
+            const entered = Number(document.getElementById('paymentAmount')?.value || 0);
+            if (!Number.isFinite(entered) || entered < 0) return toast('Nominal pembayaran tidak valid.');
+            const total = Math.max(0, Number(pendingCheckout.total) || 0);
+            const previous = pendingCheckout.existingId
+                ? getNetPaidAmount(findTransactionRecord(pendingCheckout.existingId, pendingCheckout.existingOwnerUid || ''))
+                : 0;
+            const due = Math.max(0, total - previous);
+            const isCash = pendingCheckout.pay === 'Tunai';
+            const applied = Math.min(entered, due);
+            const change = isCash ? Math.max(0, entered - due) : 0;
 
             if (pendingCheckout.existingId) {
-                const t = db.transactions.find(x => x.id === pendingCheckout.existingId);
+                const t = findTransactionRecord(pendingCheckout.existingId, pendingCheckout.existingOwnerUid || '');
                 if (!t) return toast('Transaksi tidak ditemukan');
-                const newPaid = (+t.paidAmount || 0) + amount;
-                t.paidAmount = newPaid;
-                t.status = newPaid >= total ? 'lunas' : newPaid > 0 ? 'sebagian' : 'belum bayar';
-                t.change = 0;
+                const previousChange = Number(t.change) || 0;
+                const paymentHistory = Array.isArray(t.payments) ? t.payments.slice() :
+                    (previous > 0 ? [{ method: t.pay || 'Tunai', amount: previous, change: previousChange, date: t.date || today(), time: t.time || '' }] : []);
+                if (applied > 0) paymentHistory.push({ method: pendingCheckout.pay || t.pay || 'Tunai', amount: applied, change, date: today(), time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) });
+                t.payments = paymentHistory;
+                t.paidAmount = previous + applied;
+                t.change = previousChange + change;
+                const methods = [...new Set(paymentHistory.map(x => String(x.method || 'Tunai')))];
+                t.pay = methods.length > 1 ? 'Campuran' : (methods[0] || t.pay || 'Tunai');
+                t.paymentVersion = 2;
+                t.status = t.paidAmount >= total ? 'lunas' : t.paidAmount > 0 ? 'sebagian' : 'belum bayar';
                 save();
                 closeModal();
                 pendingCheckout = null;
                 renderAll();
-                toast(t.status === 'lunas' ? 'Pembayaran lunas' : 'Pembayaran belum lunas');
+                toast(t.status === 'lunas' ? 'Pembayaran lunas' : 'Pembayaran tersimpan, masih ada sisa tagihan');
                 if (t.status === 'lunas') openPaymentSuccess(t);
                 return;
             }
 
-            const status = amount >= total && total > 0 ? 'lunas' : amount > 0 ? 'sebagian' : 'belum bayar';
-            const record = saveCheckoutRecord(status, amount, 0);
+            const status = applied >= total && total > 0 ? 'lunas' : applied > 0 ? 'sebagian' : 'belum bayar';
+            const record = saveCheckoutRecord(status, applied, change);
             closeModal();
             pendingCheckout = null;
             cart = [];
             renderAll();
-
             if (status === 'lunas') openPaymentSuccess(record);
-            else toast(status === 'sebagian' ? `Tersimpan. Sisa ${rupiah(total - amount)}` : 'Transaksi tersimpan sebagai belum bayar');
+            else toast(status === 'sebagian' ? `Tersimpan. Sisa ${rupiah(total - applied)}` : 'Transaksi tersimpan sebagai belum bayar');
         }
 
-        function openSettlePayment(id) {
-            openPaymentModal(id);
+        function openSettlePayment(id, ownerUid = '') {
+            openPaymentModal(id, ownerUid);
         }
 
         function openPaymentSuccess(t) {
             // Buka pratinjau thermal dengan pilihan ukuran dan tombol cetak.
-            printThermal(t.id, 80);
+            printThermal(t.id, 80, t.cashierUid || t.createdByUid || '');
         }
 
 
@@ -4344,7 +4471,7 @@ let pendingPurchaseBahanId = null;
                 endingTotal = 0;
             bahanTable.innerHTML = db.bahan.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'id', { sensitivity: 'base', numeric: true })).map(b => {
                 const x = stockSummary(b, r.from, r.to);
-                const pv = stockPurchases(r.from, r.to).filter(m => m.bahanId === b.id).reduce((a, m) => a + (+m.total || 0), 0);
+                const pv = stockPurchases(r.from, r.to).filter(m => String(m.bahanId) === String(b.id)).reduce((a, m) => a + (+m.total || 0), 0);
                 const ov = stockValue(b, x.opening, r.from),
                     uv = stockValue(b, x.used, r.to),
                     ev = stockValue(b, Math.max(0, x.ending), r.to);
@@ -4456,17 +4583,19 @@ let pendingPurchaseBahanId = null;
             if (!month) return toast('Tentukan bulan mulai penggunaan stok terlebih dahulu.');
             const p = stockPeriodForMonth(month);
             if (!p) return toast('Periode stok awal tidak tersedia.');
-            p.opening = p.opening && typeof p.opening === 'object' ? p.opening : {};
+            const openingValues = {};
             let invalid = false;
             db.bahan.forEach(b => {
                 const e = document.getElementById('initialOpen_' + b.id);
                 if (e) {
                     const value = Number(e.value);
-                    if (!Number.isFinite(value) || value < 0) invalid = true;
-                    else p.opening[b.id] = value;
+                    if (!Number.isFinite(value) || value < 0 || (b.unit === 'pcs' && !Number.isInteger(value))) invalid = true;
+                    else openingValues[b.id] = value;
                 }
             });
-            if (invalid) return toast('Jumlah stok harus berupa angka nol atau lebih.');
+            if (invalid) return toast('Jumlah stok harus nol atau lebih; satuan pcs wajib bilangan bulat.');
+            p.opening = p.opening && typeof p.opening === 'object' ? p.opening : {};
+            Object.assign(p.opening, openingValues);
             p.openingDate = p.from;
             // Saldo pembuka manual hanya boleh ada pada bulan mulai. Semua bulan setelahnya otomatis.
             Object.values(db.stockPeriods || {}).forEach(period => {
@@ -4494,13 +4623,20 @@ let pendingPurchaseBahanId = null;
                 key = rangeKey(r.from, r.to),
                 p = ensurePeriod(key, r.from, r.to),
                 d = document.getElementById('openingDate').value;
-            if (!d || d > r.to) return toast('Tanggal stok awal tidak valid');
+            if (!d || d < r.from || d > r.to) return toast('Tanggal stok awal harus berada dalam periode yang dipilih.');
+            const openingValues = {};
+            for (const b of db.bahan) {
+                const e = document.getElementById('open_' + b.id);
+                if (!e) continue;
+                const value = Number(e.value);
+                if (!Number.isFinite(value) || value < 0 || (b.unit === 'pcs' && !Number.isInteger(value))) {
+                    return toast(`Stok awal ${b.name} tidak valid. Satuan pcs harus bilangan bulat dan stok tidak boleh negatif.`);
+                }
+                openingValues[b.id] = value;
+            }
             if (!getStockStartMonth()) db.settings.stockStartMonth = String(r.from).slice(0, 7);
             p.openingDate = d;
-            db.bahan.forEach(b => {
-                const e = document.getElementById('open_' + b.id);
-                if (e) p.opening[b.id] = +e.value || 0
-            });
+            Object.assign(p.opening, openingValues);
             save();
             closeModal();
             renderAll();
@@ -4533,8 +4669,9 @@ let pendingPurchaseBahanId = null;
             purchaseHistoryCount.textContent = rows.length.toLocaleString('id-ID');
             purchaseHistoryTotal.textContent = rupiah(rows.reduce((sum, m) => sum + (Number(m.total) || 0), 0));
             purchaseTable.innerHTML = rows.map(m => {
+                const ownerUid = String(m.createdByUid || m.cashierUid || '').replace(/[^A-Za-z0-9_-]/g, '');
                 const controls = canManagePurchaseRecord(m)
-                    ? `<div style="display:flex;gap:6px"><button class="btn" title="Edit pembelian" onclick="openPurchaseModal(${m.id})">✏️ Edit</button><button class="btn" title="Hapus pembelian" onclick="deletePurchase(${m.id})">🗑️ Hapus</button></div>`
+                    ? `<div style="display:flex;gap:6px"><button class="btn" title="Edit pembelian" onclick="openPurchaseModal(${m.id},'${ownerUid}')">✏️ Edit</button><button class="btn" title="Hapus pembelian" onclick="deletePurchase(${m.id},'${ownerUid}')">🗑️ Hapus</button></div>`
                     : '—';
                 return `<tr><td>${formatDateID(m.date)}</td><td><b>${escapeHtml(m.bahanName || '')}</b></td><td>${formatQty(m.packages||0)} kemasan<br><small style="color:var(--muted)">${formatQty(m.contentPerPackage || ((+m.qty||0)/Math.max(1,+m.packages||1)))} ${escapeHtml(m.unit || '')}/kemasan</small></td><td>${formatQty(m.qty)} ${escapeHtml(m.unit || '')}</td><td>${rupiah(m.cost)}</td><td>${rupiah(m.total)}</td><td>${escapeHtml(m.note || '-')}</td><td>${controls}</td></tr>`;
             }).join('') || '<tr><td colspan="8"><div class="empty">Belum ada pembelian pada tanggal yang dipilih.</div></td></tr>';
@@ -4559,7 +4696,8 @@ let pendingPurchaseBahanId = null;
             expenseHistoryTotal.textContent = rupiah(ownExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0));
             expenseTable.innerHTML = ownExpenses.slice().sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')) || (+b.id||0)-(+a.id||0)).map(e => {
                 const canManage = isAdminClient() || (isKasirClient() && String(e.createdByUid || e.cashierUid || '') === String(currentUser?.uid || ''));
-                return `<tr><td>${formatDateID(e.date)}</td><td>${escapeHtml(e.cat || '')}</td><td>${escapeHtml(e.note || '')}</td><td><b>${rupiah(e.amount)}</b></td><td><div style="display:flex;gap:6px">${canManage ? `<button class="btn" title="Edit pengeluaran" onclick="openExpenseModal(${e.id})">✏️ Edit</button><button class="btn" title="Hapus pengeluaran" onclick="deleteExpense(${e.id})">🗑️ Hapus</button>` : '—'}</div></td></tr>`;
+                const ownerUid = String(e.createdByUid || e.cashierUid || '').replace(/[^A-Za-z0-9_-]/g, '');
+                return `<tr><td>${formatDateID(e.date)}</td><td>${escapeHtml(e.cat || '')}</td><td>${escapeHtml(e.note || '')}</td><td><b>${rupiah(e.amount)}</b></td><td><div style="display:flex;gap:6px">${canManage ? `<button class="btn" title="Edit pengeluaran" onclick="openExpenseModal(${e.id},'${ownerUid}')">✏️ Edit</button><button class="btn" title="Hapus pengeluaran" onclick="deleteExpense(${e.id},'${ownerUid}')">🗑️ Hapus</button>` : '—'}</div></td></tr>`;
             }).join('') || '<tr><td colspan="5"><div class="empty">Belum ada pengeluaran pada tanggal yang dipilih.</div></td></tr>';
         }
 
@@ -4646,14 +4784,14 @@ let pendingPurchaseBahanId = null;
 
         const deletingTransactionIds = new Set();
 
-        async function deleteTransaction(id) {
-            const transaction = (db.transactions || []).find(t => String(t.id) === String(id));
+        async function deleteTransaction(id, ownerUid = '') {
+            const transaction = findTransactionRecord(id, ownerUid);
             if (!transaction) return toast('Transaksi tidak ditemukan. Muat ulang data lalu coba lagi.');
             if (!canManageTransactionRecord(transaction)) {
                 return toast('Anda hanya dapat menghapus transaksi milik akun sendiri.');
             }
 
-            const deleteKey = String(id);
+            const deleteKey = String(ownerUid || transaction.cashierUid || transaction.createdByUid || '') + '__' + String(id);
             if (deletingTransactionIds.has(deleteKey)) return toast('Transaksi ini sedang diproses untuk dihapus.');
 
             const itemSummary = (transaction.items || [])
@@ -4696,41 +4834,52 @@ let pendingPurchaseBahanId = null;
             try {
                 const transactionsRef = colRef('transactions');
                 const documentId = String(id);
-                const directRef = transactionsRef.doc(documentId);
-                const directSnapshot = await directRef.get();
                 let documentsToDelete = [];
-
-                // Data baru disimpan dengan ID transaksi sebagai ID dokumen.
-                // Jalur utama cukup membaca satu dokumen, bukan seluruh koleksi.
-                if (directSnapshot.exists) {
-                    const remoteData = directSnapshot.data() || {};
-                    if (!isAllowedRemoteRecord(remoteData)) {
-                        throw new Error('Transaksi tidak dapat dihapus karena pemilik data di server tidak cocok dengan akun ini.');
+                // Dokumen baru memakai owner__id agar dua kasir tidak saling menimpa.
+                if (targetOwner) {
+                    const ownedRef = transactionsRef.doc(String(targetOwner) + '__' + documentId);
+                    const ownedSnapshot = await ownedRef.get();
+                    if (ownedSnapshot.exists) documentsToDelete.push(ownedSnapshot.ref);
+                }
+                const directRef = transactionsRef.doc(documentId);
+                try {
+                    const directSnapshot = await directRef.get();
+                    if (directSnapshot.exists) {
+                        const remoteData = directSnapshot.data() || {};
+                        // Abaikan dokumen bernomor sama milik kasir lain.
+                        if (isAllowedRemoteRecord(remoteData)) documentsToDelete.push(directSnapshot.ref);
                     }
-                    documentsToDelete = [directSnapshot.ref];
-                } else {
-                    // Kompatibilitas data lama: beberapa transaksi memakai ID dokumen
-                    // otomatis dan menyimpan ID transaksi di field data.id.
-                    const legacySnapshot = await transactionsRef.where('id', '==', transaction.id).get();
-                    documentsToDelete = legacySnapshot.docs
-                        .filter(doc => {
-                            const data = doc.data() || {};
-                            return String(data.id) === documentId && isAllowedRemoteRecord(data);
-                        })
-                        .map(doc => doc.ref);
+                } catch (e) {
+                    // Akun kasir mungkin tidak berhak membaca dokumen legacy milik akun lain.
+                    if (isAdminClient()) throw e;
+                }
 
-                    // Jika ID pada data lama tersimpan sebagai string, coba tipe string
-                    // juga. Query tetap terbatas pada ID transaksi yang sedang dihapus.
-                    if (!documentsToDelete.length && typeof transaction.id !== 'string') {
-                        const stringSnapshot = await transactionsRef.where('id', '==', documentId).get();
-                        documentsToDelete = stringSnapshot.docs
-                            .filter(doc => {
+                // Admin dapat membersihkan duplikat legacy berdasarkan ID, tetapi hanya
+                // untuk pemilik transaksi yang sedang dihapus. Kasir membatasi query
+                // berdasarkan UID agar tidak membaca koleksi akun lain.
+                if (isAdminClient()) {
+                    const snapshots = await Promise.all([
+                        transactionsRef.where('id', '==', transaction.id).get(),
+                        transactionsRef.where('id', '==', documentId).get()
+                    ]);
+                    snapshots.forEach(snapshot => snapshot.docs.forEach(doc => {
+                        const data = doc.data() || {};
+                        if (String(data.id) === documentId && isAllowedRemoteRecord(data)) documentsToDelete.push(doc.ref);
+                    }));
+                } else if (targetOwner) {
+                    for (const field of ['cashierUid', 'createdByUid']) {
+                        try {
+                            const snapshot = await transactionsRef.where(field, '==', targetOwner).get();
+                            snapshot.docs.forEach(doc => {
                                 const data = doc.data() || {};
-                                return String(data.id) === documentId && isAllowedRemoteRecord(data);
-                            })
-                            .map(doc => doc.ref);
+                                if (String(data.id) === documentId && isAllowedRemoteRecord(data)) documentsToDelete.push(doc.ref);
+                            });
+                        } catch (e) {
+                            console.warn('Query penghapusan legacy ' + field + ' dilewati:', e?.code || e?.message || e);
+                        }
                     }
                 }
+                documentsToDelete = [...new Map(documentsToDelete.map(ref => [ref.path, ref])).values()];
 
                 // Tidak ditemukan berarti dokumen cloud sudah tidak ada; bersihkan cache
                 // lokal agar transaksi lama tidak terus muncul setelah aplikasi dimuat ulang.
@@ -4767,11 +4916,14 @@ let pendingPurchaseBahanId = null;
         function getPaymentMethodTotals(transactions) {
             const totals = { Tunai: 0, QRIS: 0, Transfer: 0 };
             (transactions || []).forEach(t => {
-                const method = String(t.pay || 'Tunai').trim().toLowerCase();
-                const paid = Math.max(0, Number(t.paidAmount ?? (t.status === 'lunas' ? t.total : 0)) || 0);
-                if (method.includes('qris')) totals.QRIS += paid;
-                else if (method.includes('transfer')) totals.Transfer += paid;
-                else totals.Tunai += paid;
+                const payments = Array.isArray(t.payments) ? t.payments : [{ method: t.pay || 'Tunai', amount: getNetPaidAmount(t) }];
+                payments.forEach(payment => {
+                    const method = String(payment.method || 'Tunai').trim().toLowerCase();
+                    const amount = Math.max(0, Number(payment.amount) || 0);
+                    if (method.includes('qris')) totals.QRIS += amount;
+                    else if (method.includes('transfer')) totals.Transfer += amount;
+                    else if (method.includes('tunai')) totals.Tunai += amount;
+                });
             });
             return totals;
         }
@@ -4801,7 +4953,8 @@ let pendingPurchaseBahanId = null;
                 const cls = status === 'lunas' ? 'status-paid' : status === 'sebagian' ? 'status-partial' : 'status-unpaid';
                 const label = status === 'lunas' ? 'Lunas' : status === 'sebagian' ? 'Belum Lunas' : 'Belum Bayar';
                 const remaining = Math.max(0, (+t.total || 0) - (+t.paidAmount || 0));
-                return `<tr><td>${formatDateID(t.date)} ${t.time}</td><td>${escapeHtml(t.cashierName || '—')}</td><td>${(t.items || []).map(i=>escapeHtml(i.name)+' ×'+i.qty).join(', ')}</td><td>${escapeHtml(t.pay || '')}</td><td><span class="badge ${cls}">${label}</span></td><td>${remaining ? rupiah(remaining) : '-'}</td><td><b>${rupiah(t.total)}</b></td>${kasirView ? '' : `<td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td>`}<td class="no-print"><div style="display:flex;gap:5px;flex-wrap:wrap"><button class="btn" onclick="printThermal(${t.id},80)">🧾 Nota</button>${status !== 'lunas' ? `<button class="btn" onclick="openSettlePayment(${t.id})">💳 Bayar</button>` : ''}${canManageTransactionRecord(t) ? `<button class="btn danger" data-transaction-id="${escapeHtml(String(t.id))}" onclick="deleteTransaction(this.dataset.transactionId)">🗑️ Hapus</button>` : ''}</div></td></tr>`;
+                const ownerUid = String(t.cashierUid || t.createdByUid || '').replace(/[^A-Za-z0-9_-]/g, '');
+                return `<tr><td>${formatDateID(t.date)} ${t.time}</td><td>${escapeHtml(t.cashierName || '—')}</td><td>${(t.items || []).map(i=>escapeHtml(i.name)+' ×'+i.qty).join(', ')}</td><td>${escapeHtml(t.pay || '')}</td><td><span class="badge ${cls}">${label}</span></td><td>${remaining ? rupiah(remaining) : '-'}</td><td><b>${rupiah(t.total)}</b></td>${kasirView ? '' : `<td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td>`}<td class="no-print"><div style="display:flex;gap:5px;flex-wrap:wrap"><button class="btn" onclick="printThermal('${t.id}',80,'${ownerUid}')">🧾 Nota</button>${status !== 'lunas' ? `<button class="btn" onclick="openSettlePayment('${t.id}','${ownerUid}')">💳 Bayar</button>` : ''}${canManageTransactionRecord(t) ? `<button class="btn danger" data-transaction-id="${escapeHtml(String(t.id))}" data-owner-uid="${escapeHtml(ownerUid)}" onclick="deleteTransaction(this.dataset.transactionId,this.dataset.ownerUid)">🗑️ Hapus</button>` : ''}</div></td></tr>`;
             }).join('') || `<tr><td colspan="${kasirView ? 8 : 10}"><div class="empty">Belum ada transaksi pada periode ini.</div></td></tr>`;
         }
 
@@ -4919,8 +5072,14 @@ let pendingPurchaseBahanId = null;
             const valid = menuRecipeDraft.filter(r => r.bahanId && r.qty > 0);
             const hpp = recipeCost(valid);
             if (!fName.value.trim()) return toast('Nama menu wajib diisi');
-            if (!+fPrice.value) return toast('Harga jual wajib diisi');
+            const sellingPrice = Number(fPrice.value);
+            if (!Number.isFinite(sellingPrice) || sellingPrice <= 0) return toast('Harga jual harus lebih dari 0.');
             if (!valid.length) return toast('Tambahkan minimal satu bahan ke resep');
+            for (const row of valid) {
+                const ingredient = db.bahan.find(b => String(b.id) === String(row.bahanId));
+                if (!ingredient || !Number.isFinite(Number(row.qty)) || Number(row.qty) <= 0) return toast('Periksa bahan dan jumlah pada resep.');
+                if (ingredient.unit === 'pcs' && !Number.isInteger(Number(row.qty))) return toast('Pemakaian bahan satuan pcs harus bilangan bulat.');
+            }
             if (!isAdminClient()) return toast('Hanya Admin yang dapat menyimpan menu.');
             const oldMenu = id ? db.menus.find(m => String(m.id) === String(id)) : null;
             const menuId = id ? (oldMenu?.id ?? id) : db.nextId++;
@@ -4928,7 +5087,7 @@ let pendingPurchaseBahanId = null;
                 id: menuId,
                 name: fName.value.trim(),
                 cat: fCat.value,
-                price: +fPrice.value,
+                price: sellingPrice,
                 hpp,
                 emoji: fEmoji.value || ({Minuman:'🥤',Makanan:'🍜',Snack:'🍟'}[fCat.value] || '🥤'),
                 active: oldMenu ? oldMenu.active !== false : true
@@ -5003,8 +5162,10 @@ let pendingPurchaseBahanId = null;
                 cost = +((costEl?.value) || 0),
                 min = +((minEl?.value) || 0);
             if (!name) return toast('Nama bahan wajib diisi');
-            if (content <= 0) return toast('Isi kemasan harus lebih dari 0');
-            if (cost < 0) return toast('Harga kemasan tidak valid');
+            if (!Number.isFinite(content) || content <= 0) return toast('Isi kemasan harus lebih dari 0');
+            if (unit === 'pcs' && !Number.isInteger(content)) return toast('Isi kemasan untuk satuan pcs harus bilangan bulat.');
+            if (!Number.isFinite(cost) || cost < 0) return toast('Harga kemasan tidak valid');
+            if (!Number.isFinite(min) || min < 0) return toast('Minimum stok tidak valid.');
             const x = {
                 id: id || db.nextId++,
                 name,
@@ -5033,17 +5194,17 @@ let pendingPurchaseBahanId = null;
             openBahanModal();
         }
 
-        function openPurchaseModal(editId = null) {
+        function openPurchaseModal(editId = null, ownerUid = '') {
             if (editId && !isAdminClient()) return toast('Hanya Admin yang dapat mengedit pembelian.');
             const r = getRange();
-            const editing = editId ? db.purchases.find(x => x.id === editId) : null;
+            const editing = editId ? db.purchases.find(x => String(x.id) === String(editId) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid))) : null;
             if (editId && !editing) return toast('Data pembelian tidak ditemukan.');
             if (!db.bahan.length) return openModal('Pembelian Bahan', `<div class="empty">Belum ada bahan yang terdaftar.<div style="margin-top:12px"><button class="btn primary" onclick="openBahanForPurchase()">＋ Tambah Bahan Baru</button></div></div>`);
             const selectedId = editing ? editing.bahanId : pendingPurchaseBahanId;
             const opts = db.bahan.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'id', { sensitivity: 'base', numeric: true })).map(b => `<option value="${b.id}" ${selectedId===b.id?'selected':''}>${b.name}</option>`).join('');
             const defaultDate = editing?.date || ((today() >= r.from && today() <= r.to) ? today() : r.from);
             const editingContent = editing ? (+editing.contentPerPackage || ((+editing.qty || 0) / Math.max(1, +editing.packages || 1)) || db.bahan.find(x => String(x.id) === String(selectedId))?.content || db.bahan[0]?.content || 1) : (db.bahan.find(x => String(x.id) === String(selectedId))?.content || db.bahan[0]?.content || 1);
-            openModal(editing ? 'Edit Pembelian Bahan' : 'Form Pembelian Bahan', `<p style="margin-top:0;color:var(--muted);font-size:13px">${editing ? 'Perubahan akan memperbarui riwayat pembelian dan perhitungan stok yang berkaitan.' : 'Isi jumlah kemasan, ukuran isi aktual per kemasan, dan harga beli. Ukuran bisa berbeda dari pembelian sebelumnya; stok dan resep tetap dihitung dalam satuan dasar bahan.'}</p><div class="form-grid"><div class="field full"><label>BAHAN</label><select id="pBahan" onchange="updatePurchasePriceDefault();updatePurchaseContentDefault();updatePurchasePreview()">${opts}</select><button type="button" class="btn" style="margin-top:8px" onclick="openBahanForPurchase()">＋ Tambah Bahan Baru</button></div><div class="field"><label>TANGGAL PEMBELIAN</label><input id="pDate" type="date" value="${defaultDate}"></div><div class="field"><label>JUMLAH KEMASAN</label><input id="pPackages" type="number" step="1" min="1" value="${editing?.packages ?? 1}" oninput="updatePurchasePreview()"></div><div class="field"><label>ISI PER KEMASAN (${(db.bahan.find(x => x.id === selectedId) || db.bahan[0]).unit})</label><input id="pContent" type="number" step="0.01" min="0.01" value="${editingContent}" oninput="updatePurchasePreview()"><small style="color:var(--muted)">Contoh SKM: 250 ml atau 500 ml</small></div><div class="field"><label>HARGA / KEMASAN</label><input id="pCost" type="number" min="0" value="${editing?.cost ?? ''}" oninput="updatePurchasePreview()"></div><div class="field"><label>ISI MASUK</label><input id="pQty" readonly></div><div class="field full"><label>KETERANGAN</label><input id="pNote" value="${editing?.note || ''}" placeholder="Contoh: pembelian stok"></div></div><div id="purchasePreview" style="margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:var(--muted)"></div><button class="btn primary" style="margin-top:15px" onclick="savePurchase(${editId || 0})">${editing ? 'Simpan Perubahan' : 'Simpan Pembelian'}</button>`);
+            openModal(editing ? 'Edit Pembelian Bahan' : 'Form Pembelian Bahan', `<p style="margin-top:0;color:var(--muted);font-size:13px">${editing ? 'Perubahan akan memperbarui riwayat pembelian dan perhitungan stok yang berkaitan.' : 'Isi jumlah kemasan, ukuran isi aktual per kemasan, dan harga beli. Ukuran bisa berbeda dari pembelian sebelumnya; stok dan resep tetap dihitung dalam satuan dasar bahan.'}</p><div class="form-grid"><div class="field full"><label>BAHAN</label><select id="pBahan" onchange="updatePurchasePriceDefault();updatePurchaseContentDefault();updatePurchasePreview()">${opts}</select><button type="button" class="btn" style="margin-top:8px" onclick="openBahanForPurchase()">＋ Tambah Bahan Baru</button></div><div class="field"><label>TANGGAL PEMBELIAN</label><input id="pDate" type="date" value="${defaultDate}"></div><div class="field"><label>JUMLAH KEMASAN</label><input id="pPackages" type="number" step="1" min="1" value="${editing?.packages ?? 1}" oninput="updatePurchasePreview()"></div><div class="field"><label>ISI PER KEMASAN (${(db.bahan.find(x => x.id === selectedId) || db.bahan[0]).unit})</label><input id="pContent" type="number" step="0.01" min="0.01" value="${editingContent}" oninput="updatePurchasePreview()"><small style="color:var(--muted)">Contoh SKM: 250 ml atau 500 ml</small></div><div class="field"><label>HARGA / KEMASAN</label><input id="pCost" type="number" min="0" value="${editing?.cost ?? ''}" oninput="updatePurchasePreview()"></div><div class="field"><label>ISI MASUK</label><input id="pQty" readonly></div><div class="field full"><label>KETERANGAN</label><input id="pNote" value="${editing?.note || ''}" placeholder="Contoh: pembelian stok"></div></div><div id="purchasePreview" style="margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:var(--muted)"></div><button class="btn primary" style="margin-top:15px" onclick="savePurchase(${editId || 0},'${String(editing?.createdByUid || editing?.cashierUid || ownerUid || '').replace(/[^A-Za-z0-9_-]/g, '')}')">${editing ? 'Simpan Perubahan' : 'Simpan Pembelian'}</button>`);
             const b = db.bahan.find(x => x.id === selectedId) || db.bahan[0];
             if (pendingPurchaseBahanId !== null) pendingPurchaseBahanId = null;
             const pCostEl = document.getElementById('pCost');
@@ -5111,7 +5272,7 @@ let pendingPurchaseBahanId = null;
                 const ending = {};
                 db.bahan.forEach(b => {
                     const opening = +(p.opening[b.id] ?? 0);
-                    const purchases = stockPurchases(p.from, p.to).filter(x => x.bahanId === b.id).reduce((a, x) => a + (+x.qty || 0), 0);
+                    const purchases = stockPurchases(p.from, p.to).filter(x => String(x.bahanId) === String(b.id)).reduce((a, x) => a + (+x.qty || 0), 0);
                     const used = usageForRange(b, p.from, p.to);
                     ending[b.id] = opening + purchases - used;
                 });
@@ -5121,12 +5282,12 @@ let pendingPurchaseBahanId = null;
         }
 
         function syncPurchaseToStockMove(purchase) {
-            const idx = db.stockMoves.findIndex(x => x.id === purchase.id && x.type === 'purchase');
+            const idx = db.stockMoves.findIndex(x => String(x.id) === String(purchase.id) && String(x.createdByUid || x.cashierUid || '') === String(purchase.createdByUid || purchase.cashierUid || '') && x.type === 'purchase');
             if (idx >= 0) db.stockMoves[idx] = { ...purchase };
             else db.stockMoves.push({ ...purchase });
         }
 
-        function savePurchase(editId = 0) {
+        function savePurchase(editId = 0, ownerUid = '') {
             const b = db.bahan.find(x => x.id === +(document.getElementById('pBahan')?.value || 0));
             const date = document.getElementById('pDate')?.value || '';
             const n = +(document.getElementById('pPackages')?.value || 0);
@@ -5139,12 +5300,12 @@ let pendingPurchaseBahanId = null;
             if (content <= 0 || !Number.isFinite(content)) return toast('Isi per kemasan harus lebih dari 0');
             if (b.unit === 'pcs' && !Number.isInteger(content)) return toast('Isi per kemasan untuk satuan pcs harus bilangan bulat');
             if (price < 0) return toast('Harga kemasan tidak valid');
-            const existing = editId ? db.purchases.find(x => x.id === editId) : null;
+            const existing = editId ? db.purchases.find(x => String(x.id) === String(editId) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid))) : null;
             if (editId && !existing) return toast('Data pembelian tidak ditemukan.');
             const purchase = { id: editId || db.nextId++, type:'purchase', date, bahanId:b.id, bahanName:b.name, packages:n, contentPerPackage:content, qty:n*content, unit:b.unit, cost:price, total:n*price, note, cashAccountType: existing?.cashAccountType || (isKasirClient() ? 'kasir' : 'admin'), cashAccountUid: existing?.cashAccountUid || currentUser?.uid || '', createdByUid: existing?.createdByUid || existing?.cashierUid || currentUser?.uid || '', createdByName: existing?.createdByName || existing?.cashierName || currentUserName || 'User' };
-            if (editId) db.purchases = db.purchases.map(x => x.id === editId ? purchase : x);
+            if (editId) db.purchases = db.purchases.map(x => String(x.id) === String(editId) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid)) ? purchase : x);
             else db.purchases.push(purchase);
-            sharedStockPurchases = [...(sharedStockPurchases || []).filter(x => String(x.id) !== String(purchase.id)), purchase];
+            sharedStockPurchases = [...(sharedStockPurchases || []).filter(x => !(String(x.id) === String(purchase.id) && String(x.createdByUid || x.cashierUid || '') === String(purchase.createdByUid || purchase.cashierUid || ''))), purchase];
             syncPurchaseToStockMove(purchase);
             recalculateStockPeriods();
             save();
@@ -5153,28 +5314,67 @@ let pendingPurchaseBahanId = null;
             toast(editId ? 'Pembelian berhasil diperbarui dan stok disesuaikan.' : `Pembelian tersimpan · stok bertambah ${formatQty(purchase.qty)} ${b.unit}`);
         }
 
-        function deletePurchase(id) {
+        async function deletePurchase(id, ownerUid = '') {
             if (!isAdminClient()) return toast('Hanya Admin yang dapat menghapus pembelian.');
-            const p = db.purchases.find(x => x.id === id);
+            const p = db.purchases.find(x => String(x.id) === String(id) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid)));
             if (!p) return toast('Data pembelian tidak ditemukan.');
             if (!confirm(`Hapus pembelian ${p.bahanName} tanggal ${formatDateID(p.date)}? Stok masuk dan nilai pembelian terkait akan ikut dibatalkan.`)) return;
-            db.purchases = db.purchases.filter(x => x.id !== id);
-            db.stockMoves = db.stockMoves.filter(x => !(x.id === id && x.type === 'purchase'));
-            recalculateStockPeriods();
-            save();
-            renderAll();
-            toast('Pembelian dihapus dan stok disesuaikan.');
+            if (!navigator.onLine) return toast('Penghapusan pembelian membutuhkan koneksi internet.');
+            if (!firebaseReady || !currentUser?.uid || !fbAuth?.currentUser || fbAuth.currentUser.uid !== currentUser.uid) {
+                return toast('Sesi Firebase belum siap. Silakan login ulang lalu coba lagi.');
+            }
+            try {
+                const ref = colRef('purchases');
+                const targets = new Map();
+                const ownerUid = String(p.createdByUid || p.cashierUid || '');
+                if (ownerUid) {
+                    const owned = await ref.doc(ownerUid + '__' + String(id)).get();
+                    if (owned.exists) targets.set(owned.ref.path, owned.ref);
+                }
+                const direct = await ref.doc(String(id)).get();
+                if (direct.exists) {
+                    const data = direct.data() || {};
+                    const remoteOwner = String(data.createdByUid || data.cashierUid || '');
+                    if (!ownerUid || !remoteOwner || remoteOwner === ownerUid) targets.set(direct.ref.path, direct.ref);
+                }
+                // Dukung dokumen lama/duplikat, tetapi jangan menghapus pembelian
+                // milik kasir lain yang kebetulan mempunyai nomor ID sama.
+                const byNumber = await ref.where('id', '==', p.id).get();
+                byNumber.docs.forEach(d => {
+                    const data = d.data() || {};
+                    const remoteOwner = String(data.createdByUid || data.cashierUid || '');
+                    if ((!ownerUid || !remoteOwner || remoteOwner === ownerUid) && String(data.id) === String(p.id)) targets.set(d.ref.path, d.ref);
+                });
+                const byString = await ref.where('id', '==', String(p.id)).get();
+                byString.docs.forEach(d => {
+                    const data = d.data() || {};
+                    const remoteOwner = String(data.createdByUid || data.cashierUid || '');
+                    if ((!ownerUid || !remoteOwner || remoteOwner === ownerUid) && String(data.id) === String(p.id)) targets.set(d.ref.path, d.ref);
+                });
+                if (targets.size) await Promise.all([...targets.values()].map(r => r.delete()));
+
+                db.purchases = (db.purchases || []).filter(x => !(String(x.id) === String(id) && String(x.createdByUid || x.cashierUid || '') === String(p.createdByUid || p.cashierUid || '')));
+                sharedStockPurchases = (sharedStockPurchases || []).filter(x => !(String(x.id) === String(id) && String(x.createdByUid || x.cashierUid || '') === String(p.createdByUid || p.cashierUid || '')));
+                db.stockMoves = (db.stockMoves || []).filter(x => !(String(x.id) === String(id) && String(x.createdByUid || x.cashierUid || '') === String(p.createdByUid || p.cashierUid || '') && x.type === 'purchase'));
+                recalculateStockPeriods();
+                save();
+                renderAll();
+                toast('Pembelian dihapus dari perangkat dan Firebase. Stok telah dihitung ulang.');
+            } catch (e) {
+                console.error('Gagal menghapus pembelian:', e);
+                toast('Penghapusan pembelian gagal: ' + (e.message || 'Periksa koneksi dan Firestore Rules.'));
+            }
         }
 
-        function openExpenseModal(editId = null) {
+        function openExpenseModal(editId = null, ownerUid = '') {
             if (!isAdminClient() && !isKasirClient()) return toast('Akses menu pengeluaran tidak diizinkan.');
-            const editing = editId ? db.expenses.find(x => x.id === editId) : null;
+            const editing = editId ? db.expenses.find(x => String(x.id) === String(editId) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid))) : null;
             if (editId && !editing) return toast('Data pengeluaran tidak ditemukan.');
             if (editing && !recordBelongsToCurrentUser(editing, 'expense')) return toast('Anda hanya dapat mengubah pengeluaran milik akun sendiri.');
-            openModal(editing ? 'Edit Pengeluaran' : 'Catat Pengeluaran', `<div class="form-grid"><div class="field"><label>TANGGAL</label><input id="eDate" type="date" value="${editing?.date || today()}"></div><div class="field"><label>KATEGORI</label><input id="eCat" value="${escapeHtml(editing?.cat || 'Operasional')}"></div><div class="field"><label>JUMLAH</label><input id="eAmount" type="number" min="0" value="${editing?.amount ?? ''}"></div><div class="field full"><label>KETERANGAN</label><input id="eNote" value="${escapeHtml(editing?.note || '')}" placeholder="Contoh: beli gas"></div></div><button class="btn primary" style="margin-top:15px" onclick="saveExpense(${editId || 0})">${editing ? 'Simpan Perubahan' : 'Simpan'}</button>`)
+            openModal(editing ? 'Edit Pengeluaran' : 'Catat Pengeluaran', `<div class="form-grid"><div class="field"><label>TANGGAL</label><input id="eDate" type="date" value="${editing?.date || today()}"></div><div class="field"><label>KATEGORI</label><input id="eCat" value="${escapeHtml(editing?.cat || 'Operasional')}"></div><div class="field"><label>JUMLAH</label><input id="eAmount" type="number" min="0" value="${editing?.amount ?? ''}"></div><div class="field full"><label>KETERANGAN</label><input id="eNote" value="${escapeHtml(editing?.note || '')}" placeholder="Contoh: beli gas"></div></div><button class="btn primary" style="margin-top:15px" onclick="saveExpense(${editId || 0},'${String(editing?.createdByUid || editing?.cashierUid || ownerUid || '').replace(/[^A-Za-z0-9_-]/g, '')}')">${editing ? 'Simpan Perubahan' : 'Simpan'}</button>`)
         }
 
-        function saveExpense(editId = 0) {
+        function saveExpense(editId = 0, ownerUid = '') {
             if (!isAdminClient() && !isKasirClient()) return toast('Akses mencatat pengeluaran tidak diizinkan.');
             const date = document.getElementById('eDate')?.value || today();
             const cat = (document.getElementById('eCat')?.value || '').trim();
@@ -5182,14 +5382,14 @@ let pendingPurchaseBahanId = null;
             const amount = +(document.getElementById('eAmount')?.value || 0);
             if (!date) return toast('Tanggal wajib diisi');
             if (!cat) return toast('Kategori wajib diisi');
-            if (amount <= 0) return toast('Masukkan jumlah');
-            const existing = editId ? db.expenses.find(x => x.id === editId) : null;
+            if (!Number.isFinite(amount) || amount <= 0) return toast('Masukkan jumlah yang valid dan lebih dari 0.');
+            const existing = editId ? db.expenses.find(x => String(x.id) === String(editId) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid))) : null;
             if (editId && !existing) return toast('Data pengeluaran tidak ditemukan.');
             if (existing && !recordBelongsToCurrentUser(existing, 'expense')) return toast('Anda hanya dapat mengubah pengeluaran milik akun sendiri.');
             const item = { id: editId || db.nextId++, date, cat, note, amount, cashAccountType: existing?.cashAccountType || (isKasirClient() ? 'kasir' : 'admin'), cashAccountUid: existing?.cashAccountUid || currentUser?.uid || '',
                 createdByUid: existing?.createdByUid || existing?.cashierUid || currentUser?.uid || '',
                 createdByName: existing?.createdByName || existing?.cashierName || currentUserName || currentUser?.displayName || 'User' };
-            if (editId) db.expenses = db.expenses.map(x => x.id === editId ? item : x);
+            if (editId) db.expenses = db.expenses.map(x => String(x.id) === String(editId) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid)) ? item : x);
             else db.expenses.push(item);
             save();
             closeModal();
@@ -5197,13 +5397,13 @@ let pendingPurchaseBahanId = null;
             toast(editId ? 'Pengeluaran berhasil diperbarui.' : 'Pengeluaran tersimpan');
         }
 
-        function deleteExpense(id) {
+        function deleteExpense(id, ownerUid = '') {
             if (!isAdminClient() && !isKasirClient()) return toast('Akses menghapus pengeluaran tidak diizinkan.');
-            const e = db.expenses.find(x => x.id === id);
+            const e = db.expenses.find(x => String(x.id) === String(id) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid)));
             if (!e) return toast('Data pengeluaran tidak ditemukan.');
             if (!recordBelongsToCurrentUser(e, 'expense')) return toast('Anda hanya dapat menghapus pengeluaran milik akun sendiri.');
             if (confirm(`Hapus pengeluaran ${rupiah(e.amount)} — ${e.note || e.cat}? Data ini juga akan hilang dari laporan terkait.`)) {
-                db.expenses = db.expenses.filter(x => x.id !== id);
+                db.expenses = db.expenses.filter(x => !(String(x.id) === String(id) && String(x.createdByUid || x.cashierUid || '') === String(e.createdByUid || e.cashierUid || '')));
                 save();
                 renderAll();
                 toast('Pengeluaran dihapus.');
@@ -5381,13 +5581,14 @@ let pendingPurchaseBahanId = null;
             const r = getReportRange(),
                 tx = rangeTransactions(r.from, r.to),
                 ex = db.expenses.filter(x => inRange(x.date, r.from, r.to));
-            const omzet = tx.reduce((a, t) => a + t.total, 0),
-                hpp = tx.reduce((a, t) => a + t.hpp, 0),
+            const scopedExpenses = ex.filter(e => recordBelongsToCurrentUser(e, 'expense'));
+            const omzet = tx.reduce((a, t) => a + (Number(t.total) || 0), 0),
+                hpp = tx.reduce((a, t) => a + (Number(t.hpp) || 0), 0),
                 laba = omzet - hpp,
-                keluar = ex.reduce((a, e) => a + e.amount, 0),
+                keluar = scopedExpenses.reduce((a, e) => a + (Number(e.amount) || 0), 0),
                 net = laba - keluar;
             const rows = tx.map(t => `<tr><td>${formatDateID(t.date)}</td><td>${t.cashierName || t.createdByName || 'Kasir'}</td><td>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</td><td class="num">${rupiah(t.total)}</td><td class="num">${rupiah(t.hpp)}</td><td class="num">${rupiah(t.total-t.hpp)}</td></tr>`).join('');
-            const exRows = ex.filter(e => recordBelongsToCurrentUser(e, 'expense')).map(e => `<tr><td>${formatDateID(e.date)}</td><td>${e.createdByName || e.cashierName || '—'}</td><td>${e.cat}</td><td>${e.note||'-'}</td><td class="num">${rupiah(e.amount)}</td></tr>`).join('');
+            const exRows = scopedExpenses.map(e => `<tr><td>${formatDateID(e.date)}</td><td>${e.createdByName || e.cashierName || '—'}</td><td>${e.cat}</td><td>${e.note||'-'}</td><td class="num">${rupiah(e.amount)}</td></tr>`).join('');
             const paymentTotals = getPaymentMethodTotals(tx);
             const body = reportHeader('LAPORAN LABA RUGI', r.from, r.to) + `<h3>Rincian Penerimaan Pembayaran</h3><table><thead><tr><th>Metode Pembayaran</th><th>Jumlah Diterima</th></tr></thead><tbody><tr><td>Tunai</td><td class="num">${rupiah(paymentTotals.Tunai)}</td></tr><tr><td>QRIS</td><td class="num">${rupiah(paymentTotals.QRIS)}</td></tr><tr><td>Transfer</td><td class="num">${rupiah(paymentTotals.Transfer)}</td></tr><tr><th>Total Pembayaran Diterima</th><th class="num">${rupiah(paymentTotals.Tunai + paymentTotals.QRIS + paymentTotals.Transfer)}</th></tr></tbody></table><h3>Pendapatan & HPP</h3><table><thead><tr><th>Tanggal</th><th>Nama Kasir</th><th>Transaksi</th><th>Omzet</th><th>HPP</th><th>Laba Kotor</th></tr></thead><tbody>${rows||'<tr><td colspan="6">Tidak ada transaksi.</td></tr>'}</tbody></table><h3 style="margin-top:18px">Pengeluaran</h3><table><thead><tr><th>Tanggal</th><th>Nama Kasir</th><th>Kategori</th><th>Keterangan</th><th>Jumlah</th></tr></thead><tbody>${exRows||'<tr><td colspan="5">Tidak ada pengeluaran.</td></tr>'}</tbody></table><div class="summary"><table><tr><th>Omzet</th><td class="num">${rupiah(omzet)}</td></tr><tr><th>HPP</th><td class="num">${rupiah(hpp)}</td></tr><tr><th>Laba Kotor</th><td class="num">${rupiah(laba)}</td></tr><tr><th>Pengeluaran</th><td class="num">${rupiah(keluar)}</td></tr><tr><th>Laba Bersih</th><td class="num"><b>${rupiah(net)}</b></td></tr></table></div>`;
             openPrintWindow('Laporan Laba Rugi', body);
@@ -5414,21 +5615,22 @@ let pendingPurchaseBahanId = null;
             openPrintWindow('Laporan Stok', body);
         }
 
-        function openThermalOptions(id) {
-            const t = db.transactions.find(x => x.id === id);
+        function openThermalOptions(id, ownerUid = '') {
+            const t = findTransactionRecord(id, ownerUid);
             if (!t) return toast('Transaksi tidak ditemukan');
+            const safeOwner = String(t.cashierUid || t.createdByUid || '').replace(/[^A-Za-z0-9_-]/g, '');
             openModal('Cetak Nota Thermal', `
                 <p style="margin-top:0;color:var(--muted)">Nota hanya dicetak menggunakan printer thermal.</p>
                 <div class="pay">
-                    <button type="button" onclick="printThermal(${Number(id)},57)">Thermal 57 mm</button>
-                    <button type="button" class="active" onclick="printThermal(${Number(id)},80)">Thermal 80 mm</button>
+                    <button type="button" onclick="printThermal('${t.id}',57,'${safeOwner}')">Thermal 57 mm</button>
+                    <button type="button" class="active" onclick="printThermal('${t.id}',80,'${safeOwner}')">Thermal 80 mm</button>
                 </div>
                 <button type="button" class="btn" style="width:100%;margin-top:10px" onclick="closeModal()">Batal</button>
             `);
         }
 
-        function printThermal(id, width) {
-            const t = db.transactions.find(x => String(x.id) === String(id));
+        function printThermal(id, width, ownerUid = '') {
+            const t = findTransactionRecord(id, ownerUid);
             if (!t) return toast('Transaksi tidak ditemukan.');
 
             // Batasi pilihan pada ukuran printer thermal yang didukung.
@@ -5763,8 +5965,8 @@ let pendingPurchaseBahanId = null;
                 if (x.type === 'transfer' && x.fromAccountType === type && String(x.fromAccountUid) === String(uid)) balance -= Number(x.amount) || 0;
                 if (x.type === 'transfer' && x.toAccountType === type && (String(x.toAccountUid) === String(uid) || (type === 'admin' && String(x.toAccountUid) === 'admin'))) balance += Number(x.amount) || 0;
             });
-            const tx = (db.transactions || []).filter(t => String(t.cashierUid || '') === String(uid) && t.date >= start && t.date <= today() && String(t.pay || '').toLowerCase().includes('tunai'));
-            balance += tx.reduce((a,t)=>a+Math.max(0, Number(t.paidAmount ?? (t.status === 'lunas' ? t.total : 0)) || 0),0);
+            const tx = (db.transactions || []).filter(t => String(t.cashierUid || '') === String(uid) && t.date >= start && t.date <= today());
+            balance += tx.reduce((sum, t) => sum + getCashPaidAmount(t), 0);
             const expenses = (db.expenses || []).filter(x => {
                 const accountType = x.cashAccountType || (String(x.createdByUid || '') === String(currentUser?.uid || '') ? (isKasirClient() ? 'kasir' : 'admin') : 'kasir');
                 const accountUid = x.cashAccountUid || x.createdByUid || '';
@@ -5832,7 +6034,10 @@ let pendingPurchaseBahanId = null;
                 }
                 if (masuk || keluar) rows.push({date:x.date, cashierName:x.ownerName || x.createdByName || '—', type:label, note:x.note || '-', masuk, keluar, order:0});
             });
-            (db.transactions || []).filter(t => recordBelongsToCurrentUser(t,'transaction') && t.date >= from && t.date <= to && String(t.pay||'').toLowerCase().includes('tunai')).forEach(t=>rows.push({date:t.date,cashierName:t.cashierName||'—',type:'Penjualan tunai',note:(t.items||[]).map(i=>`${i.name} ×${i.qty}`).join(', '),masuk:Math.max(0,Number(t.paidAmount ?? (t.status==='lunas'?t.total:0))||0),keluar:0,order:1}));
+            (db.transactions || []).filter(t => recordBelongsToCurrentUser(t,'transaction') && t.date >= from && t.date <= to).forEach(t => {
+                const cashReceived = getCashPaidAmount(t);
+                if (cashReceived > 0) rows.push({date:t.date,cashierName:t.cashierName||'—',type:'Penjualan tunai',note:(t.items||[]).map(i=>`${i.name} ×${i.qty}`).join(', '),masuk:cashReceived,keluar:0,order:1});
+            });
             const isAccountExpense = x => {
                 const inferredType = x.cashAccountType || (String(x.createdByUid||'') === String(currentUser?.uid||'') ? (isKasirClient()?'kasir':'admin') : 'kasir');
                 const inferredUid = x.cashAccountUid || x.createdByUid || '';
