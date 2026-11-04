@@ -3495,6 +3495,31 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                     if (!wanted.has(d.id)) await d.ref.delete()
             }
         }
+        // Simpan satu dokumen saja untuk operasi kas/pengeluaran.
+        // Tidak mengirim ulang seluruh koleksi yang mungkin berisi dokumen lama dengan Rules berbeda.
+        async function writeSingleRecord(name, item) {
+            if (!currentUser || !firebaseReady || !fbAuth?.currentUser || fbAuth.currentUser.uid !== currentUser.uid)
+                throw new Error('Sesi Firebase tidak valid. Login kembali.');
+            if (!navigator.onLine) throw new Error('Koneksi internet diperlukan untuk menyimpan data.');
+            const id = String(item?.id ?? '').trim();
+            if (!id || id === 'undefined') throw new Error('ID data tidak valid.');
+            const ref = colRef(name);
+            let documentId = id;
+            if (['transactions', 'purchases', 'expenses', 'stock'].includes(name)) {
+                const ownerUid = String(name === 'transactions'
+                    ? (item.cashierUid || item.createdByUid || item.ownerUid || '')
+                    : (item.createdByUid || item.cashierUid || item.ownerUid || ''));
+                if (!ownerUid) throw new Error('UID pemilik data tidak tersedia.');
+                const namespacedId = ownerUid + '__' + id;
+                const legacy = await ref.doc(id).get();
+                const legacyOwner = legacy.exists
+                    ? String(legacy.data()?.createdByUid || legacy.data()?.cashierUid || legacy.data()?.ownerUid || '') : '';
+                documentId = legacy.exists && (!legacyOwner || legacyOwner === ownerUid) ? id : namespacedId;
+            }
+            await ref.doc(documentId).set(item, { merge: true });
+            return documentId;
+        }
+
         async function syncFirebase(force = false) {
             if (!currentUser || !firebaseReady || !fbAuth?.currentUser || fbAuth.currentUser.uid !== currentUser.uid) {
                 setCloudStatus('Gagal — sesi Firebase tidak valid');
@@ -5455,7 +5480,7 @@ let pendingPurchaseBahanId = null;
             openModal(editing ? 'Edit Pengeluaran' : 'Catat Pengeluaran', `<div class="form-grid"><div class="field"><label>TANGGAL</label><input id="eDate" type="date" value="${editing?.date || today()}"></div><div class="field"><label>KATEGORI</label><input id="eCat" value="${escapeHtml(editing?.cat || 'Operasional')}"></div><div class="field"><label>JUMLAH</label><input id="eAmount" type="number" min="0" value="${editing?.amount ?? ''}"></div><div class="field full"><label>KETERANGAN</label><input id="eNote" value="${escapeHtml(editing?.note || '')}" placeholder="Contoh: beli gas"></div></div><button class="btn primary" style="margin-top:15px" onclick="saveExpense(${editId || 0},'${String(editing?.createdByUid || editing?.cashierUid || ownerUid || '').replace(/[^A-Za-z0-9_-]/g, '')}')">${editing ? 'Simpan Perubahan' : 'Simpan'}</button>`)
         }
 
-        function saveExpense(editId = 0, ownerUid = '') {
+        async function saveExpense(editId = 0, ownerUid = '') {
             if (!isAdminClient() && !isKasirClient()) return toast('Akses mencatat pengeluaran tidak diizinkan.');
             const date = document.getElementById('eDate')?.value || today();
             const cat = (document.getElementById('eCat')?.value || '').trim();
@@ -5467,15 +5492,30 @@ let pendingPurchaseBahanId = null;
             const existing = editId ? db.expenses.find(x => String(x.id) === String(editId) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid))) : null;
             if (editId && !existing) return toast('Data pengeluaran tidak ditemukan.');
             if (existing && !recordBelongsToCurrentUser(existing, 'expense')) return toast('Anda hanya dapat mengubah pengeluaran milik akun sendiri.');
-            const item = { id: editId || db.nextId++, date, cat, note, amount, cashAccountType: existing?.cashAccountType || (isKasirClient() ? 'kasir' : 'admin'), cashAccountUid: existing?.cashAccountUid || currentUser?.uid || '',
-                createdByUid: existing?.createdByUid || existing?.cashierUid || currentUser?.uid || '',
+            const uid = String(existing?.createdByUid || existing?.cashierUid || currentUser?.uid || '');
+            const item = { id: editId || db.nextId, date, cat, note, amount,
+                cashAccountType: existing?.cashAccountType || (isKasirClient() ? 'kasir' : 'admin'),
+                cashAccountUid: existing?.cashAccountUid || currentUser?.uid || '',
+                ownerUid: existing?.ownerUid || uid,
+                createdByUid: uid,
                 createdByName: existing?.createdByName || existing?.cashierName || currentUserName || currentUser?.displayName || 'User' };
-            if (editId) db.expenses = db.expenses.map(x => String(x.id) === String(editId) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid)) ? item : x);
-            else db.expenses.push(item);
-            save();
-            closeModal();
-            renderAll();
-            toast(editId ? 'Pengeluaran berhasil diperbarui.' : 'Pengeluaran tersimpan');
+            const btn = document.querySelector('#modalBody button.btn.primary');
+            if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan ke Firestore...'; }
+            setCloudStatus('Menyimpan pengeluaran...');
+            try {
+                await writeSingleRecord('expenses', item);
+                if (editId) db.expenses = db.expenses.map(x => String(x.id) === String(editId) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid)) ? item : x);
+                else { db.nextId = Math.max(Number(db.nextId) || 1, Number(item.id) + 1); db.expenses.push(item); }
+                setCloudStatus('Tersinkron', true);
+                closeModal();
+                renderAll();
+                toast(editId ? 'Pengeluaran berhasil disimpan ke Firestore.' : 'Pengeluaran tersimpan di Firestore.');
+            } catch (e) {
+                console.error('saveExpense Firestore:', e);
+                setCloudStatus('Sinkron gagal');
+                if (btn) { btn.disabled = false; btn.textContent = editId ? 'Simpan Perubahan' : 'Simpan'; }
+                toast('Pengeluaran GAGAL disimpan: ' + (e?.code ? e.code + ' — ' : '') + (e?.message || 'Periksa Firestore Rules dan koneksi.'));
+            }
         }
 
         function deleteExpense(id, ownerUid = '') {
@@ -5998,7 +6038,7 @@ let pendingPurchaseBahanId = null;
             save(); renderAll(); toast('Saldo awal ' + (a.type === 'kasir' ? 'kasir' : 'admin') + ' berhasil disimpan.');
         }
 
-        function saveCashEntry() {
+        async function saveCashEntry() {
             if (!isAdminClient() && !isKasirClient()) return toast('Akses transaksi kas tidak diizinkan.');
             ensureCashFinanceData();
             const type = document.getElementById('cashEntryType')?.value || 'modal';
@@ -6008,22 +6048,36 @@ let pendingPurchaseBahanId = null;
             if (!date || !Number.isFinite(amount) || amount <= 0) return toast('Tanggal dan nominal wajib diisi.');
             const a = currentCashAccount();
             const id = 'cash_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+            let row;
             if (type === 'transfer' && isAdminClient()) {
                 const targetUid = String(document.getElementById('cashTransferUid')?.value || '').trim();
                 if (!targetUid) return toast('UID kasir tujuan wajib diisi untuk transfer.');
-                // Satu transaksi transfer mengubah dua saldo, tetapi tidak dihitung sebagai omzet/biaya.
-                db.cashLedger.push({ id, type: 'transfer', date, amount, note: note || 'Transfer kas admin ke kasir', fromAccountType: 'admin', fromAccountUid: currentUser?.uid || 'admin', toAccountType: 'kasir', toAccountUid: targetUid, cashAccountType: 'admin', cashAccountUid: currentUser?.uid || 'admin', ownerUid: targetUid, ownerName: a.name, createdByUid: currentUser?.uid || '', createdByName: a.name });
+                row = { id, type: 'transfer', date, amount, note: note || 'Transfer kas admin ke kasir', fromAccountType: 'admin', fromAccountUid: currentUser?.uid || 'admin', toAccountType: 'kasir', toAccountUid: targetUid, cashAccountType: 'admin', cashAccountUid: currentUser?.uid || 'admin', ownerUid: currentUser?.uid || '', ownerName: a.name, createdByUid: currentUser?.uid || '', createdByName: a.name };
             } else if (type === 'setor' && isKasirClient()) {
-                // Setoran kasir masuk ke kas admin dan bukan biaya usaha.
-                db.cashLedger.push({ id, type: 'transfer', date, amount, note: note || 'Setoran kasir ke admin', fromAccountType: 'kasir', fromAccountUid: a.uid, toAccountType: 'admin', toAccountUid: 'admin', cashAccountType: 'kasir', cashAccountUid: a.uid, ownerUid: a.uid, ownerName: a.name, createdByUid: a.uid, createdByName: a.name });
+                // UID pemilik dan pembuat harus sama dengan akun kasir yang sedang login.
+                row = { id, type: 'transfer', date, amount, note: note || 'Setoran kasir ke admin', fromAccountType: 'kasir', fromAccountUid: a.uid, toAccountType: 'admin', toAccountUid: 'admin', cashAccountType: 'kasir', cashAccountUid: a.uid, ownerUid: currentUser?.uid || a.uid, ownerName: a.name, createdByUid: currentUser?.uid || a.uid, createdByName: a.name };
             } else {
-                db.cashLedger.push({ id, type, date, amount, note, cashAccountType: a.type, cashAccountUid: a.type === 'admin' ? (currentUser?.uid || 'admin') : a.uid, ownerUid: currentUser?.uid || '', ownerName: a.name, createdByUid: currentUser?.uid || '', createdByName: a.name });
+                row = { id, type, date, amount, note, cashAccountType: a.type, cashAccountUid: a.type === 'admin' ? (currentUser?.uid || 'admin') : a.uid, ownerUid: currentUser?.uid || '', ownerName: a.name, createdByUid: currentUser?.uid || '', createdByName: a.name };
             }
-            save();
-            document.getElementById('cashEntryAmount').value = '';
-            document.getElementById('cashEntryNote').value = '';
-            if (document.getElementById('cashTransferUid')) document.getElementById('cashTransferUid').value = '';
-            renderAll(); toast('Transaksi kas berhasil disimpan.');
+            const btn = document.querySelector('#cashEntryAmount')?.closest('.field, .form-grid, #modalBody')?.querySelector('button.btn.primary') || Array.from(document.querySelectorAll('button')).find(b => /Simpan.*Kas|Tambah Modal|Setor/i.test(b.textContent || ''));
+            if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan ke Firestore...'; }
+            setCloudStatus('Menyimpan transaksi kas...');
+            try {
+                // cashLedger memakai ID asli, tidak memakai namespace koleksi transaksi.
+                await writeSingleRecord('cashLedger', row);
+                upsertCashLedger(row);
+                setCloudStatus('Tersinkron', true);
+                document.getElementById('cashEntryAmount').value = '';
+                document.getElementById('cashEntryNote').value = '';
+                if (document.getElementById('cashTransferUid')) document.getElementById('cashTransferUid').value = '';
+                renderAll();
+                toast('Transaksi kas berhasil disimpan ke Firestore.');
+            } catch (e) {
+                console.error('saveCashEntry Firestore:', e);
+                setCloudStatus('Sinkron gagal');
+                if (btn) { btn.disabled = false; btn.textContent = 'Simpan'; }
+                toast('Transaksi kas GAGAL disimpan: ' + (e?.code ? e.code + ' — ' : '') + (e?.message || 'Periksa Firestore Rules dan koneksi.'));
+            }
         }
 
         function cashReportRange() {
