@@ -3513,7 +3513,27 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                 if (!ownerUid) throw new Error('UID pemilik data tidak tersedia.');
                 documentId = ownerUid + '__' + id;
             }
-            await colRef(name).doc(documentId).set(item, { merge: true });
+            // Firestore Web SDK dapat membiarkan Promise write tetap pending saat
+            // perangkat kehilangan jalur ke server. Beri batas waktu agar UI tidak
+            // terkunci selamanya. Timeout bukan bukti write gagal: request asli tetap
+            // berjalan dan bisa saja dikonfirmasi kemudian; gunakan ID dokumen yang
+            // sama agar percobaan ulang tidak membuat dokumen duplikat.
+            const writePromise = colRef(name).doc(documentId).set(item, { merge: true });
+            let timeoutId;
+            try {
+                await Promise.race([
+                    writePromise,
+                    new Promise((_, reject) => {
+                        timeoutId = setTimeout(() => {
+                            const err = new Error('Belum ada konfirmasi dari Firestore setelah 20 detik. Periksa koneksi internet atau akses Firebase. Jangan langsung membuat transaksi baru; data mungkin masih diproses.');
+                            err.code = 'firestore/ack-timeout';
+                            reject(err);
+                        }, 20000);
+                    })
+                ]);
+            } finally {
+                if (timeoutId) clearTimeout(timeoutId);
+            }
             return documentId;
         }
 
