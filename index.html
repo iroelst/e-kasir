@@ -3365,7 +3365,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                     return x
                 });
                 db.cashLedger = cashLedger.map(x => { delete x.__docId; return x; });
-                db.stockMoves = stockMoves.map(x => {
+                db.stockMoves = dedupeCloudRecords(stockMoves, 'purchase').map(x => {
                     delete x.__docId;
                     return x
                 });
@@ -3442,7 +3442,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                 // ID lokal dapat sama pada dua akun kasir. Simpan transaksi,
                 // pembelian, dan pengeluaran pada namespace pemilik agar tidak saling menimpa.
                 let documentId = id;
-                if (['transactions', 'purchases', 'expenses'].includes(name)) {
+                if (['transactions', 'purchases', 'expenses', 'stock'].includes(name)) {
                     const ownerUid = String(name === 'transactions'
                         ? (item.cashierUid || item.createdByUid || '')
                         : (item.createdByUid || item.cashierUid || ''));
@@ -3703,7 +3703,9 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
         function stockTransactions(from, to) {
             // Gabungkan data bersama dari cloud dengan transaksi lokal terbaru yang belum tersinkron.
             const byId = new Map();
-            [...(sharedStockTransactions || []), ...(db.transactions || [])].forEach(t => {
+            // Data lokal dimasukkan lebih dulu; snapshot cloud yang lebih baru
+            // menjadi sumber utama bila ID transaksi sama.
+            [...(db.transactions || []), ...(sharedStockTransactions || [])].forEach(t => {
                 const owner = String(t.cashierUid || t.createdByUid || 'legacy');
                 const key = owner + '__' + String(t.id ?? (t.date + '_' + t.time));
                 byId.set(key, t);
@@ -3713,7 +3715,8 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
 
         function stockPurchases(from, to) {
             const byId = new Map();
-            [...(sharedStockPurchases || []), ...(db.purchases || [])].forEach(p => {
+            // Snapshot cloud mengalahkan cache lokal untuk ID yang sama.
+            [...(db.purchases || []), ...(sharedStockPurchases || [])].forEach(p => {
                 const owner = String(p.createdByUid || p.cashierUid || 'legacy');
                 const key = owner + '__' + String(p.id ?? (p.date + '_' + p.bahanId));
                 byId.set(key, p);
@@ -5392,6 +5395,37 @@ let pendingPurchaseBahanId = null;
                     if ((!ownerUid || !remoteOwner || remoteOwner === ownerUid) && String(data.id) === String(p.id)) targets.set(d.ref.path, d.ref);
                 });
                 if (targets.size) await Promise.all([...targets.values()].map(r => r.delete()));
+
+                // Pembelian juga disalin ke koleksi stock sebagai histori pergerakan.
+                // Hapus salinan tersebut agar tidak muncul kembali saat data stok dimuat.
+                const stockRef = colRef('stock');
+                const stockTargets = new Map();
+                if (ownerUid) {
+                    const ownedStock = await stockRef.doc(ownerUid + '__' + String(id)).get();
+                    if (ownedStock.exists) stockTargets.set(ownedStock.ref.path, ownedStock.ref);
+                }
+                const directStock = await stockRef.doc(String(id)).get();
+                if (directStock.exists) {
+                    const data = directStock.data() || {};
+                    const remoteOwner = String(data.createdByUid || data.cashierUid || '');
+                    if (!ownerUid || !remoteOwner || remoteOwner === ownerUid) {
+                        stockTargets.set(directStock.ref.path, directStock.ref);
+                    }
+                }
+                for (const queryValue of [p.id, String(p.id)]) {
+                    const snapshot = await stockRef.where('id', '==', queryValue).get();
+                    snapshot.docs.forEach(d => {
+                        const data = d.data() || {};
+                        const remoteOwner = String(data.createdByUid || data.cashierUid || '');
+                        if (String(data.id) === String(p.id) &&
+                            (!ownerUid || !remoteOwner || remoteOwner === ownerUid)) {
+                            stockTargets.set(d.ref.path, d.ref);
+                        }
+                    });
+                }
+                if (stockTargets.size) {
+                    await Promise.all([...stockTargets.values()].map(r => r.delete()));
+                }
 
                 db.purchases = (db.purchases || []).filter(x => !(String(x.id) === String(id) && String(x.createdByUid || x.cashierUid || '') === String(p.createdByUid || p.cashierUid || '')));
                 sharedStockPurchases = (sharedStockPurchases || []).filter(x => !(String(x.id) === String(id) && String(x.createdByUid || x.cashierUid || '') === String(p.createdByUid || p.cashierUid || '')));
