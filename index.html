@@ -5091,64 +5091,12 @@ let pendingPurchaseBahanId = null;
             if (preview) preview.textContent = `Total pembelian: ${rupiah(n*price)} · Stok bertambah ${formatQty(qty)} ${b.unit} · Harga dasar pembelian: ${rupiah(content > 0 ? price/content : 0)} per ${b.unit}`;
         }
 
-        // Migrasi satu kali: stok awal manual yang dahulu dimasukkan pada Oktober 2026
-        // dijadikan saldo pembuka Januari 2026. Periode bulan berikutnya dibuat berurutan
-        // agar pembelian dan pemakaian tiap bulan ikut membentuk saldo awal bulan berikutnya.
+        // Tidak memaksakan Januari untuk usaha baru. Setiap usaha menentukan
+        // sendiri bulan pertama penggunaan stok melalui menu Atur Bulan Mulai.
+        // Data lama yang memang sudah dimigrasikan ke Januari tetap dikenali
+        // melalui penanda openingMigration2026 di normalizeDb().
         function migrateInitialStockToJanuary2026() {
-            if (!isAdminClient()) return false;
-            // Jika bulan mulai sudah ditetapkan oleh pengguna, jangan menganggap
-            // stok awal Oktober sebagai data lama yang harus dipindah ke Januari.
-            if (db.settings?.stockStartMonth) return false;
-            const periods = Object.values(db.stockPeriods || {}).filter(p => p && p.from && p.to);
-            const janKey = rangeKey('2026-01-01', '2026-01-31');
-            const janExisting = db.stockPeriods[janKey] || periods.find(p => p.from === '2026-01-01' && p.to === '2026-01-31');
-            if (janExisting?.openingMigration2026 === 'october-to-january') return false;
-
-            // Ambil periode Oktober yang memang memiliki stok awal manual.
-            const source = periods
-                .filter(p => p.openingDate && String(p.openingDate).startsWith('2026-10-') && p.opening && Object.keys(p.opening).length)
-                .sort((a, b) => String(a.from).localeCompare(String(b.from)))[0];
-            if (!source) return false;
-            // Jangan menimpa stok awal Januari yang sudah pernah diatur secara manual.
-            if (janExisting?.openingDate && String(janExisting.openingDate) < '2026-10-01') return false;
-
-            const opening = JSON.parse(JSON.stringify(source.opening || {}));
-            const jan = janExisting || {
-                from: '2026-01-01', to: '2026-01-31', opening: {}, openingDate: null, ending: {}
-            };
-            jan.from = '2026-01-01';
-            jan.to = '2026-01-31';
-            jan.opening = opening;
-            jan.openingDate = '2026-01-01';
-            jan.ending = {};
-            jan.openingMigration2026 = 'october-to-january';
-            db.settings.stockStartMonth = '2026-01';
-            db.stockPeriods[janKey] = jan;
-
-            // Stok awal Oktober bukan saldo kedua: kosongkan pembuka manualnya.
-            source.opening = {};
-            source.openingDate = null;
-            source.ending = {};
-
-            // Lengkapi periode bulanan yang belum ada sampai bulan terakhir yang sudah
-            // memiliki periode, minimal sampai Oktober 2026.
-            const latestTo = periods.reduce((latest, p) => String(p.to) > latest ? String(p.to) : latest, '2026-10-31');
-            const latestMonth = latestTo.slice(0, 7);
-            let cursor = new Date(2026, 0, 1);
-            const end = new Date(Number(latestMonth.slice(0, 4)), Number(latestMonth.slice(5, 7)), 1);
-            while (cursor < end) {
-                const y = cursor.getFullYear();
-                const m = String(cursor.getMonth() + 1).padStart(2, '0');
-                const lastDay = new Date(y, cursor.getMonth() + 1, 0).getDate();
-                const from = `${y}-${m}-01`;
-                const to = `${y}-${m}-${String(lastDay).padStart(2, '0')}`;
-                const exists = Object.values(db.stockPeriods).some(p => p && p.from === from && p.to === to);
-                if (!exists) db.stockPeriods[rangeKey(from, to)] = { from, to, opening: {}, openingDate: null, ending: {} };
-                cursor = new Date(y, cursor.getMonth() + 1, 1);
-            }
-
-            recalculateStockPeriods();
-            return true;
+            return false;
         }
 
         function recalculateStockPeriods() {
