@@ -2792,6 +2792,20 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                 </div>
                 <div class="cards">
                     <div class="card metric">
+                        <div><small>Pembayaran Tunai</small><strong id="rPayCash">Rp0</strong></div>
+                        <div class="icon">💵</div>
+                    </div>
+                    <div class="card metric">
+                        <div><small>Pembayaran QRIS</small><strong id="rPayQris">Rp0</strong></div>
+                        <div class="icon">▣</div>
+                    </div>
+                    <div class="card metric">
+                        <div><small>Pembayaran Transfer</small><strong id="rPayTransfer">Rp0</strong></div>
+                        <div class="icon">🏦</div>
+                    </div>
+                </div>
+                <div class="cards" style="margin-top:12px">
+                    <div class="card metric">
                         <div><small>Omzet</small><strong id="rOmzet">Rp0</strong></div>
                         <div class="icon">💰</div>
                     </div>
@@ -4527,12 +4541,17 @@ let pendingPurchaseBahanId = null;
             return String(uid) === String(currentUser.uid);
         }
 
+        const deletingTransactionIds = new Set();
+
         async function deleteTransaction(id) {
             const transaction = (db.transactions || []).find(t => String(t.id) === String(id));
             if (!transaction) return toast('Transaksi tidak ditemukan. Muat ulang data lalu coba lagi.');
             if (!canManageTransactionRecord(transaction)) {
                 return toast('Anda hanya dapat menghapus transaksi milik akun sendiri.');
             }
+
+            const deleteKey = String(id);
+            if (deletingTransactionIds.has(deleteKey)) return toast('Transaksi ini sedang diproses untuk dihapus.');
 
             const itemSummary = (transaction.items || [])
                 .map(item => `${item.name || 'Menu'} ×${item.qty || 0}`)
@@ -4557,64 +4576,101 @@ let pendingPurchaseBahanId = null;
                 return toast('Sesi Firebase belum siap. Silakan login ulang lalu coba lagi.');
             }
 
-            // Cocokkan ID sekaligus pemilik bila tersedia agar ID yang kebetulan
-            // sama milik kasir lain tidak ikut terhapus.
             const targetOwner = transaction.cashierUid || transaction.createdByUid || '';
-            const isTargetTransaction = t => {
-                if (String(t.id) !== String(id)) return false;
-                const owner = t.cashierUid || t.createdByUid || '';
+            const isAllowedRemoteRecord = data => {
+                const owner = data.cashierUid || data.createdByUid || '';
+                if (isKasirClient() && String(owner) !== String(currentUser.uid)) return false;
                 return !targetOwner || !owner || String(owner) === String(targetOwner);
             };
 
-            // Hapus dari salinan lokal terlebih dahulu, lalu sinkronkan data tersisa.
-            db.transactions = (db.transactions || []).filter(t => !isTargetTransaction(t));
-            sharedStockTransactions = (sharedStockTransactions || [])
-                .filter(t => !isTargetTransaction(t));
-            recalculateStockPeriods();
-            normalizeDb();
-            localStorage.setItem(KEY, JSON.stringify(db));
-
-            // Batalkan sinkronisasi tertunda agar tidak menulis ulang salinan transaksi lama.
-            if (typeof syncTimer !== 'undefined' && syncTimer) clearTimeout(syncTimer);
+            deletingTransactionIds.add(deleteKey);
+            if (typeof syncTimer !== 'undefined' && syncTimer) {
+                clearTimeout(syncTimer);
+                syncTimer = null;
+            }
+            setCloudStatus('Menghapus transaksi...');
 
             try {
-                // Sinkronkan data terbaru terlebih dahulu. writeArray bersifat merge-only,
-                // sehingga penghapusan dokumen dilakukan secara eksplisit sesudahnya.
-                await syncFirebase(true);
+                const transactionsRef = colRef('transactions');
+                const documentId = String(id);
+                const directRef = transactionsRef.doc(documentId);
+                const directSnapshot = await directRef.get();
+                let documentsToDelete = [];
 
-                // Versi lama aplikasi pernah menyimpan dokumen dengan ID otomatis,
-                // bukan ID transaksi. Cari berdasarkan ID dokumen DAN field data.id.
-                const snapshot = await colRef('transactions').get();
-                const matchingDocs = snapshot.docs.filter(doc => {
-                    const data = doc.data() || {};
-                    const sameId = String(doc.id) === String(id) || String(data.id) === String(id);
-                    if (!sameId) return false;
-                    const owner = data.cashierUid || data.createdByUid || '';
-                    if (isKasirClient() && String(owner) !== String(currentUser.uid)) return false;
-                    return !targetOwner || !owner || String(owner) === String(targetOwner);
-                });
+                // Data baru disimpan dengan ID transaksi sebagai ID dokumen.
+                // Jalur utama cukup membaca satu dokumen, bukan seluruh koleksi.
+                if (directSnapshot.exists) {
+                    const remoteData = directSnapshot.data() || {};
+                    if (!isAllowedRemoteRecord(remoteData)) {
+                        throw new Error('Transaksi tidak dapat dihapus karena pemilik data di server tidak cocok dengan akun ini.');
+                    }
+                    documentsToDelete = [directSnapshot.ref];
+                } else {
+                    // Kompatibilitas data lama: beberapa transaksi memakai ID dokumen
+                    // otomatis dan menyimpan ID transaksi di field data.id.
+                    const legacySnapshot = await transactionsRef.where('id', '==', transaction.id).get();
+                    documentsToDelete = legacySnapshot.docs
+                        .filter(doc => {
+                            const data = doc.data() || {};
+                            return String(data.id) === documentId && isAllowedRemoteRecord(data);
+                        })
+                        .map(doc => doc.ref);
 
-                if (!matchingDocs.length) {
-                    throw new Error('Dokumen transaksi tidak ditemukan di Firebase. Periksa apakah data berasal dari toko/proyek Firebase yang sama.');
+                    // Jika ID pada data lama tersimpan sebagai string, coba tipe string
+                    // juga. Query tetap terbatas pada ID transaksi yang sedang dihapus.
+                    if (!documentsToDelete.length && typeof transaction.id !== 'string') {
+                        const stringSnapshot = await transactionsRef.where('id', '==', documentId).get();
+                        documentsToDelete = stringSnapshot.docs
+                            .filter(doc => {
+                                const data = doc.data() || {};
+                                return String(data.id) === documentId && isAllowedRemoteRecord(data);
+                            })
+                            .map(doc => doc.ref);
+                    }
                 }
 
-                await Promise.all(matchingDocs.map(doc => doc.ref.delete()));
+                // Tidak ditemukan berarti dokumen cloud sudah tidak ada; bersihkan cache
+                // lokal agar transaksi lama tidak terus muncul setelah aplikasi dimuat ulang.
+                if (documentsToDelete.length) {
+                    await Promise.all(documentsToDelete.map(ref => ref.delete()));
+                }
 
-                // Pastikan cache lokal tetap bersih setelah penghapusan cloud.
+                const isTargetTransaction = t => {
+                    if (String(t.id) !== documentId) return false;
+                    const owner = t.cashierUid || t.createdByUid || '';
+                    return !targetOwner || !owner || String(owner) === String(targetOwner);
+                };
                 db.transactions = (db.transactions || []).filter(t => !isTargetTransaction(t));
-                sharedStockTransactions = (sharedStockTransactions || [])
-                    .filter(t => !isTargetTransaction(t));
+                sharedStockTransactions = (sharedStockTransactions || []).filter(t => !isTargetTransaction(t));
+                recalculateStockPeriods();
                 normalizeDb();
                 localStorage.setItem(KEY, JSON.stringify(db));
                 renderAll();
-                toast('Transaksi berhasil dihapus permanen dari Firebase. Stok dan laporan telah disesuaikan.');
+                setCloudStatus('Tersinkron', true);
+                toast(documentsToDelete.length
+                    ? 'Transaksi berhasil dihapus. Stok dan laporan telah disesuaikan.'
+                    : 'Transaksi sudah tidak ada di server. Riwayat lokal telah dibersihkan.');
             } catch (e) {
                 console.error('Gagal menghapus transaksi:', e);
-                // Jangan kembalikan transaksi ke tampilan lokal; tampilkan error agar
-                // pengguna tahu bahwa penghapusan cloud belum dapat dipastikan.
-                renderAll();
+                setCloudStatus('Penghapusan gagal');
                 toast('Penghapusan belum tuntas: ' + (e.message || 'Periksa koneksi dan Firestore Rules.'));
+            } finally {
+                deletingTransactionIds.delete(deleteKey);
             }
+        }
+
+        // Rekap penerimaan berdasarkan metode pembayaran pada periode laporan.
+        // Yang dihitung adalah uang yang benar-benar dibayar, bukan sisa tagihan.
+        function getPaymentMethodTotals(transactions) {
+            const totals = { Tunai: 0, QRIS: 0, Transfer: 0 };
+            (transactions || []).forEach(t => {
+                const method = String(t.pay || 'Tunai').trim().toLowerCase();
+                const paid = Math.max(0, Number(t.paidAmount ?? (t.status === 'lunas' ? t.total : 0)) || 0);
+                if (method.includes('qris')) totals.QRIS += paid;
+                else if (method.includes('transfer')) totals.Transfer += paid;
+                else totals.Tunai += paid;
+            });
+            return totals;
         }
 
         function renderReport() {
@@ -4624,6 +4680,13 @@ let pendingPurchaseBahanId = null;
             const label = document.getElementById('reportPeriodLabel');
             if (label) label.textContent = `${formatDateID(r.from)} – ${formatDateID(r.to)}`;
             const kasirView = isKasirClient();
+            const paymentTotals = getPaymentMethodTotals(tx);
+            const paymentCashEl = document.getElementById('rPayCash');
+            const paymentQrisEl = document.getElementById('rPayQris');
+            const paymentTransferEl = document.getElementById('rPayTransfer');
+            if (paymentCashEl) paymentCashEl.textContent = rupiah(paymentTotals.Tunai);
+            if (paymentQrisEl) paymentQrisEl.textContent = rupiah(paymentTotals.QRIS);
+            if (paymentTransferEl) paymentTransferEl.textContent = rupiah(paymentTotals.Transfer);
             // Riwayat kasir menampilkan nilai penjualan/omzet saja, bukan HPP atau laba.
             const reportHead = document.querySelectorAll('#laporan .table thead th');
             if (reportHead.length >= 10) {
@@ -5211,7 +5274,8 @@ let pendingPurchaseBahanId = null;
                 net = laba - keluar;
             const rows = tx.map(t => `<tr><td>${formatDateID(t.date)}</td><td>${t.cashierName || t.createdByName || 'Kasir'}</td><td>${t.items.map(i=>i.name+' ×'+i.qty).join(', ')}</td><td class="num">${rupiah(t.total)}</td><td class="num">${rupiah(t.hpp)}</td><td class="num">${rupiah(t.total-t.hpp)}</td></tr>`).join('');
             const exRows = ex.filter(e => recordBelongsToCurrentUser(e, 'expense')).map(e => `<tr><td>${formatDateID(e.date)}</td><td>${e.createdByName || e.cashierName || '—'}</td><td>${e.cat}</td><td>${e.note||'-'}</td><td class="num">${rupiah(e.amount)}</td></tr>`).join('');
-            const body = reportHeader('LAPORAN LABA RUGI', r.from, r.to) + `<h3>Pendapatan & HPP</h3><table><thead><tr><th>Tanggal</th><th>Nama Kasir</th><th>Transaksi</th><th>Omzet</th><th>HPP</th><th>Laba Kotor</th></tr></thead><tbody>${rows||'<tr><td colspan="6">Tidak ada transaksi.</td></tr>'}</tbody></table><h3 style="margin-top:18px">Pengeluaran</h3><table><thead><tr><th>Tanggal</th><th>Nama Kasir</th><th>Kategori</th><th>Keterangan</th><th>Jumlah</th></tr></thead><tbody>${exRows||'<tr><td colspan="5">Tidak ada pengeluaran.</td></tr>'}</tbody></table><div class="summary"><table><tr><th>Omzet</th><td class="num">${rupiah(omzet)}</td></tr><tr><th>HPP</th><td class="num">${rupiah(hpp)}</td></tr><tr><th>Laba Kotor</th><td class="num">${rupiah(laba)}</td></tr><tr><th>Pengeluaran</th><td class="num">${rupiah(keluar)}</td></tr><tr><th>Laba Bersih</th><td class="num"><b>${rupiah(net)}</b></td></tr></table></div>`;
+            const paymentTotals = getPaymentMethodTotals(tx);
+            const body = reportHeader('LAPORAN LABA RUGI', r.from, r.to) + `<h3>Rincian Penerimaan Pembayaran</h3><table><thead><tr><th>Metode Pembayaran</th><th>Jumlah Diterima</th></tr></thead><tbody><tr><td>Tunai</td><td class="num">${rupiah(paymentTotals.Tunai)}</td></tr><tr><td>QRIS</td><td class="num">${rupiah(paymentTotals.QRIS)}</td></tr><tr><td>Transfer</td><td class="num">${rupiah(paymentTotals.Transfer)}</td></tr><tr><th>Total Pembayaran Diterima</th><th class="num">${rupiah(paymentTotals.Tunai + paymentTotals.QRIS + paymentTotals.Transfer)}</th></tr></tbody></table><h3>Pendapatan & HPP</h3><table><thead><tr><th>Tanggal</th><th>Nama Kasir</th><th>Transaksi</th><th>Omzet</th><th>HPP</th><th>Laba Kotor</th></tr></thead><tbody>${rows||'<tr><td colspan="6">Tidak ada transaksi.</td></tr>'}</tbody></table><h3 style="margin-top:18px">Pengeluaran</h3><table><thead><tr><th>Tanggal</th><th>Nama Kasir</th><th>Kategori</th><th>Keterangan</th><th>Jumlah</th></tr></thead><tbody>${exRows||'<tr><td colspan="5">Tidak ada pengeluaran.</td></tr>'}</tbody></table><div class="summary"><table><tr><th>Omzet</th><td class="num">${rupiah(omzet)}</td></tr><tr><th>HPP</th><td class="num">${rupiah(hpp)}</td></tr><tr><th>Laba Kotor</th><td class="num">${rupiah(laba)}</td></tr><tr><th>Pengeluaran</th><td class="num">${rupiah(keluar)}</td></tr><tr><th>Laba Bersih</th><td class="num"><b>${rupiah(net)}</b></td></tr></table></div>`;
             openPrintWindow('Laporan Laba Rugi', body);
         }
 
