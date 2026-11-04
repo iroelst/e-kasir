@@ -2790,23 +2790,17 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                         </div>
                     </div>
                 </div>
-                <div class="cards">
-                    <div class="card metric">
-                        <div><small>Pembayaran Tunai</small><strong id="rPayCash">Rp0</strong></div>
-                        <div class="icon">💵</div>
-                    </div>
-                    <div class="card metric">
-                        <div><small>Pembayaran QRIS</small><strong id="rPayQris">Rp0</strong></div>
-                        <div class="icon">▣</div>
-                    </div>
-                    <div class="card metric">
-                        <div><small>Pembayaran Transfer</small><strong id="rPayTransfer">Rp0</strong></div>
-                        <div class="icon">🏦</div>
-                    </div>
-                </div>
                 <div class="cards" style="margin-top:12px">
                     <div class="card metric">
-                        <div><small>Omzet</small><strong id="rOmzet">Rp0</strong></div>
+                        <div style="width:100%">
+                            <small>Omzet</small>
+                            <strong id="rOmzet">Rp0</strong>
+                            <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:14px;padding-top:10px;border-top:1px solid var(--border, #e5e7eb)">
+                                <div><small style="display:block">Tunai</small><strong id="rPayCash" style="font-size:clamp(12px,2vw,16px)">Rp0</strong></div>
+                                <div><small style="display:block">QRIS</small><strong id="rPayQris" style="font-size:clamp(12px,2vw,16px)">Rp0</strong></div>
+                                <div><small style="display:block">Transfer</small><strong id="rPayTransfer" style="font-size:clamp(12px,2vw,16px)">Rp0</strong></div>
+                            </div>
+                        </div>
                         <div class="icon">💰</div>
                     </div>
                     <div class="card metric">
