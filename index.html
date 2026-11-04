@@ -2511,9 +2511,9 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                         </div>
                         <div class="icon">💸</div>
                     </div>
-                    <div class="card metric receivable-card">
+                    <div class="card metric receivable-card" onclick="openUnpaidTransactions()" role="button" tabindex="0" style="cursor:pointer" title="Lihat transaksi yang belum dibayar">
                         <div><small>Belum Dibayar</small><strong id="mPiutang">Rp0</strong>
-                            <div class="trend receivable-trend" id="mPiutangCount">0 transaksi</div>
+                            <div class="trend receivable-trend" id="mPiutangCount">0 transaksi · Lihat daftar</div>
                         </div>
                         <div class="icon">⏳</div>
                     </div>
@@ -3937,8 +3937,14 @@ let pendingPurchaseBahanId = null;
             const purchaseTrend = document.querySelector('#dashboard .card.metric:has(#mKeluar) .trend');
             if (purchaseTrend) purchaseTrend.textContent = isKasirClient() ? 'Total pembelian hari ini' : 'Hari ini';
 
-            const unpaid = db.transactions.filter(t => (t.status || 'lunas') !== 'lunas');
-            const unpaidTotal = unpaid.reduce((a, t) => a + Math.max(0, (+t.total || 0) - (+t.paidAmount || 0)), 0);
+            // Samakan hak akses kartu piutang dengan riwayat transaksi:
+            // kasir hanya melihat transaksi miliknya, admin melihat seluruh transaksi.
+            const unpaid = db.transactions.filter(t =>
+                (t.status || 'lunas') !== 'lunas' &&
+                recordBelongsToCurrentUser(t, 'transaction')
+            );
+            const unpaidTotal = unpaid.reduce((a, t) =>
+                a + Math.max(0, (+t.total || 0) - getNetPaidAmount(t)), 0);
             const piutangEl = document.getElementById('mPiutang');
             const piutangCountEl = document.getElementById('mPiutangCount');
             if (piutangEl) piutangEl.textContent = rupiah(unpaidTotal);
@@ -3953,6 +3959,40 @@ let pendingPurchaseBahanId = null;
             rHpp.textContent = rupiah(totalH);
             rLaba.textContent = rupiah(totalO - totalH);
             rNet.textContent = rupiah(totalO - totalH - totalE);
+        }
+
+        function openUnpaidTransactions() {
+            // Daftar piutang tidak dibatasi filter tanggal laporan agar transaksi lama
+            // tetap bisa ditemukan dan dilunasi dari kartu dashboard.
+            const unpaid = (db.transactions || [])
+                .filter(t => (t.status || 'lunas') !== 'lunas' && recordBelongsToCurrentUser(t, 'transaction'))
+                .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) ||
+                    String(b.time || '').localeCompare(String(a.time || '')));
+
+            const content = unpaid.length ? unpaid.map(t => {
+                const ownerUid = String(t.cashierUid || t.createdByUid || '').replace(/[^A-Za-z0-9_-]/g, '');
+                const remaining = Math.max(0, (Number(t.total) || 0) - getNetPaidAmount(t));
+                const status = (t.status || 'belum bayar') === 'sebagian' ? 'Dibayar sebagian' : 'Belum dibayar';
+                const items = (t.items || []).map(i => `${escapeHtml(i.name || 'Barang')} ×${Number(i.qty) || 0}`).join(', ');
+                return `<div class="cart-item" style="align-items:flex-start">
+                    <div style="min-width:0;flex:1">
+                        <b>${items || 'Transaksi'}</b>
+                        <small style="display:block;color:var(--muted)">${formatDateID(t.date)} ${escapeHtml(t.time || '')} · ${escapeHtml(t.cashierName || 'Kasir')} · ${status}</small>
+                        <small style="display:block;color:var(--muted)">Total ${rupiah(t.total)} · Sisa ${rupiah(remaining)}</small>
+                    </div>
+                    <button class="btn primary" type="button" data-transaction-id="${escapeHtml(String(t.id))}" data-owner-uid="${escapeHtml(ownerUid)}" onclick="settleUnpaidFromList(this)">Bayar</button>
+                </div>`;
+            }).join('') : '<div class="empty">Tidak ada transaksi belum dibayar untuk akun ini.</div>';
+
+            openModal('Daftar Belum Dibayar', `<div>${content}</div><button class="btn" style="margin-top:12px" onclick="closeModal()">Tutup</button>`);
+        }
+
+        function settleUnpaidFromList(button) {
+            const id = button?.dataset?.transactionId;
+            const ownerUid = button?.dataset?.ownerUid || '';
+            if (!id) return;
+            closeModal();
+            openSettlePayment(id, ownerUid);
         }
 
         function renderRecent() {
