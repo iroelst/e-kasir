@@ -3192,38 +3192,29 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             }
             document.getElementById('platformOwnerScreen').style.display = 'none';
             document.querySelector('.app').style.display = '';
-            const local = JSON.parse(localStorage.getItem(KEY) || 'null');
-            db = local || blankDb();
+            // Firestore adalah sumber data utama; jangan memuat transaksi dari localStorage.
+            db = blankDb();
             normalizeDb();
             document.getElementById('authScreen').style.display = 'none';
             renderUserChip();
             applyRoleAccess();
             ensureAdminUserManagement();
             renderAll();
-            if (!navigator.onLine) setCloudStatus('Offline — data lokal');
-            // Jangan menahan layar login sampai seluruh koleksi Firestore selesai dibaca.
-            // Tampilkan cache lokal terlebih dahulu, lalu perbarui dari Firebase di latar belakang.
-            // Jika ada antrean lokal, sinkronkan dahulu agar data lokal belum terkirim tidak tertimpa.
-            const hasPendingSync = navigator.onLine &&
-                localStorage.getItem('ekasir_pending_sync_' + currentUser.uid) === '1';
             if (!navigator.onLine) {
-                setCloudStatus('Offline — data lokal');
+                setCloudStatus('Offline — Firestore tidak dapat diakses');
+                toast('Koneksi internet diperlukan. Data transaksi hanya disimpan di Firestore.');
             } else {
-                setCloudStatus(hasPendingSync ? 'Menyinkronkan...' : 'Memperbarui data...');
+                setCloudStatus('Memuat data Firestore...');
                 (async () => {
                     try {
-                        if (hasPendingSync) await syncFirebase(true);
-                        if (localStorage.getItem('ekasir_pending_sync_' + currentUser.uid) !== '1') {
-                            await loadFirebaseData();
-                            applyRoleAccess();
-                            ensureAdminUserManagement();
-                            renderAll();
-                        } else {
-                            setCloudStatus('Sinkronisasi tertunda — data lokal aman');
-                        }
+                        await loadFirebaseData();
+                        applyRoleAccess();
+                        ensureAdminUserManagement();
+                        renderAll();
                     } catch (backgroundError) {
-                        console.error('Pembaruan data latar belakang:', backgroundError);
-                        setCloudStatus('Data lokal — sinkronisasi tertunda');
+                        console.error('Pemuatan Firestore:', backgroundError);
+                        setCloudStatus('Gagal memuat Firestore');
+                        toast('Data Firestore gagal dimuat. Periksa koneksi dan Firestore Rules.');
                     }
                 })();
             }
@@ -3417,7 +3408,6 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                 // Hitung ulang saldo bulanan di memori saat pemuatan.
                 // Hindari menulis ulang seluruh periode ke Firebase setiap kali login.
                 recalculateStockPeriods();
-                localStorage.setItem(KEY, JSON.stringify(db));
                 await migrateUndefinedRecipes();
                 setCloudStatus('Tersinkron', true)
             } catch (e) {
@@ -3482,11 +3472,23 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                     const ownerUid = String(name === 'transactions'
                         ? (item.cashierUid || item.createdByUid || '')
                         : (item.createdByUid || item.cashierUid || ''));
-                    if (ownerUid) documentId = ownerUid + '__' + id;
+                    if (ownerUid) {
+                        const namespacedId = ownerUid + '__' + id;
+                        const namespacedDoc = await ref.doc(namespacedId).get();
+                        if (namespacedDoc.exists) {
+                            documentId = namespacedId;
+                        } else {
+                            // Pakai dokumen historis ber-ID langsung bila pemiliknya cocok;
+                            // jangan membuat salinan namespaced dari setiap transaksi lama.
+                            const legacyDoc = await ref.doc(id).get();
+                            const legacyOwner = legacyDoc.exists
+                                ? String(legacyDoc.data()?.createdByUid || legacyDoc.data()?.cashierUid || '') : '';
+                            documentId = legacyDoc.exists && (!legacyOwner || legacyOwner === ownerUid)
+                                ? id : namespacedId;
+                        }
+                    }
                 }
-                await ref.doc(documentId).set(item, {
-                    merge: true
-                })
+                await ref.doc(documentId).set(item, { merge: true });
             }
             if (allowDelete && existing) {
                 for (const d of existing.docs)
@@ -3494,85 +3496,74 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             }
         }
         async function syncFirebase(force = false) {
-            // Jangan mengirim data memakai identitas sesi lokal yang belum diverifikasi Firebase.
-            if (offlineLocalSession || !currentUser || !firebaseReady || !fbAuth?.currentUser || fbAuth.currentUser.uid !== currentUser.uid) return;
-            if (!navigator.onLine) {
-                setCloudStatus('Offline — menunggu sinkronisasi');
-                return;
+            if (!currentUser || !firebaseReady || !fbAuth?.currentUser || fbAuth.currentUser.uid !== currentUser.uid) {
+                setCloudStatus('Gagal — sesi Firebase tidak valid');
+                throw new Error('Sesi Firebase tidak valid. Silakan login kembali.');
             }
-            if (force) setCloudStatus('Menyinkronkan...');
+            if (!navigator.onLine) {
+                setCloudStatus('Gagal — tidak ada koneksi internet');
+                throw new Error('Koneksi internet diperlukan untuk menyimpan data.');
+            }
+            if (force) setCloudStatus('Menyimpan langsung ke Firestore...');
             try {
+                // Setiap penyimpanan mengirim perubahan state ke Firestore secara langsung.
+                // Operasi hanya merge; tidak ada penghapusan koleksi/dokumen historis.
                 if (isAdminClient()) {
-                    // Sinkronisasi rutin bersifat merge-only; tidak menghapus dokumen cloud
-                    // berdasarkan salinan lokal yang mungkin belum lengkap.
-                    await Promise.all([writeArray('menus', db.menus, false), writeArray('bahan', db.bahan, false), writeArray('recipes', db.recipes, false), writeArray('transactions', db.transactions, false), writeArray('purchases', db.purchases, false), writeArray('expenses', db.expenses, false), writeArray('cashLedger', db.cashLedger || [], false), writeArray('stock', db.stockMoves, false), writeArray('stockPeriods', Object.entries(db.stockPeriods).map(([id, v]) => ({
-                        id,
-                        ...v
-                    })), false)]);
-                    await fbFs.doc('toko/' + SHOP_ID + '/settings/profile').set(db.settings, {
-                        merge: true
-                    })
+                    await Promise.all([
+                        writeArray('menus', db.menus, false),
+                        writeArray('bahan', db.bahan, false),
+                        writeArray('recipes', db.recipes, false),
+                        writeArray('transactions', db.transactions, false),
+                        writeArray('purchases', db.purchases, false),
+                        writeArray('expenses', db.expenses, false),
+                        writeArray('cashLedger', db.cashLedger || [], false),
+                        writeArray('stock', db.stockMoves, false),
+                        writeArray('stockPeriods', Object.entries(db.stockPeriods || {}).map(([id, v]) => ({ id, ...v })), false)
+                    ]);
+                    await fbFs.doc('toko/' + SHOP_ID + '/settings/profile').set(db.settings || {}, { merge: true });
                 } else if (isKasirClient()) {
-                    await Promise.all([writeArray('transactions', db.transactions, false), writeArray('purchases', db.purchases, false), writeArray('expenses', db.expenses, false), writeArray('cashLedger', db.cashLedger || [], false)])
+                    await Promise.all([
+                        writeArray('transactions', db.transactions, false),
+                        writeArray('purchases', db.purchases, false),
+                        writeArray('expenses', db.expenses, false),
+                        writeArray('cashLedger', db.cashLedger || [], false)
+                    ]);
+                } else {
+                    throw new Error('Role akun tidak memiliki izin menyimpan data.');
                 }
-                localStorage.setItem(KEY, JSON.stringify(db));
-                try { localStorage.removeItem('ekasir_pending_sync_' + currentUser.uid); } catch (_) {}
-                setCloudStatus('Tersinkron', true)
+                setCloudStatus('Tersinkron', true);
+                return true;
             } catch (e) {
-                console.error(e);
-                setCloudStatus(navigator.onLine ? 'Sinkron gagal' : 'Offline — menunggu sinkronisasi');
-                if (navigator.onLine) toast('Sinkronisasi Firebase gagal: ' + (e.message || ''));
+                console.error('Penulisan langsung Firestore gagal:', e);
+                setCloudStatus('Sinkron gagal');
+                toast('GAGAL menyimpan ke Firestore: ' + (e.message || 'Periksa koneksi dan Firestore Rules.'));
+                throw e;
             }
         }
-        let syncTimer = null;
 
-        function queueCloudSync() {
-            if (!currentUser) return;
-            if (!navigator.onLine) {
-                setCloudStatus('Offline — menunggu sinkronisasi');
-                return;
-            }
-            clearTimeout(syncTimer);
-            syncTimer = setTimeout(() => syncFirebase(false), 500)
-        }
-
+        // Tidak ada antrean localStorage. Semua penyimpanan langsung menuju Firestore.
         function save() {
             normalizeDb();
-            localStorage.setItem(KEY, JSON.stringify(db));
-            if (currentUser?.uid) {
-                try { localStorage.setItem('ekasir_pending_sync_' + currentUser.uid, '1'); } catch (_) {}
-            }
-            queueCloudSync()
+            setCloudStatus('Menyimpan ke Firestore...');
+            return syncFirebase(true).catch(async (error) => {
+                // Jangan biarkan salinan gagal dianggap tersimpan. Ambil ulang data otoritatif dari Firestore.
+                try { await loadFirebaseData(); renderAll(); } catch (_) {}
+                return false;
+            });
         }
 
-        // Saat offline, transaksi tetap tersimpan di localStorage. Ketika internet
-        // kembali, kirim data lokal terlebih dahulu baru muat ulang data cloud.
         window.addEventListener('offline', () => {
-            setCloudStatus('Offline — data tersimpan di perangkat');
+            setCloudStatus('Offline — penyimpanan Firestore tidak tersedia');
         });
         window.addEventListener('online', async () => {
-            if (!firebaseReady) return;
-            // Jika sedang dalam sesi lokal, lanjutkan sinkronisasi hanya setelah Firebase
-            // memulihkan user asli; jika belum ada, jangan kirim data dengan sesi palsu.
-            if (offlineLocalSession) {
-                const authenticatedUser = fbAuth?.currentUser;
-                if (authenticatedUser) {
-                    await finishFirebaseLogin(authenticatedUser);
-                } else {
-                    setCloudStatus('Internet kembali — login diperlukan untuk sinkronisasi');
-                    showAuthMessage('Data lokal tetap aman. Login kembali saat internet aktif untuk menyinkronkan data.');
-                    return;
-                }
-            }
-            if (!currentUser) return;
-            setCloudStatus('Internet kembali — menyinkronkan...');
-            await syncFirebase(true);
-            if (localStorage.getItem('ekasir_pending_sync_' + currentUser.uid) !== '1') {
+            if (!firebaseReady || !currentUser) return;
+            try {
                 await loadFirebaseData();
-            } else {
-                setCloudStatus('Sinkronisasi tertunda — data lokal aman');
+                renderAll();
+            } catch (e) {
+                console.error('Muat ulang Firestore setelah online:', e);
+                setCloudStatus('Gagal memuat Firestore');
             }
-            renderAll();
         });
 
         function renderUserChip() {
@@ -3616,47 +3607,9 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             fbAuth.onAuthStateChanged(async user => {
                 if (registrationInProgress) return;
                 if (!user) {
-                    // Pulihkan mode lokal hanya jika perangkat sebelumnya berhasil login,
-                    // internet sedang tidak tersedia, dan profil cache cocok dengan UID.
-                    // Ini tidak membuat sesi Firebase baru dan tidak mengizinkan sinkronisasi cloud.
-                    if (!navigator.onLine) {
-                        try {
-                            const savedSession = JSON.parse(localStorage.getItem(AUTH_KEY) || 'null');
-                            const cachedProfile = savedSession?.uid
-                                ? JSON.parse(localStorage.getItem('ekasir_profile_cache_' + savedSession.uid) || 'null')
-                                : null;
-                            const cachedDb = savedSession?.uid
-                                ? localStorage.getItem(BASE_KEY + '_' + savedSession.uid)
-                                : null;
-                            if (savedSession?.uid && cachedProfile?.uid === savedSession.uid && cachedProfile.shopId && cachedProfile.role && cachedDb) {
-                                offlineLocalSession = true;
-                                currentUser = { uid: savedSession.uid, email: savedSession.email || '', displayName: cachedProfile.name || '' };
-                                currentRole = String(cachedProfile.role).toLowerCase();
-                                currentUserName = cachedProfile.name || currentUser.email.split('@')[0] || 'User';
-                                SHOP_ID = String(cachedProfile.shopId);
-                                KEY = BASE_KEY + '_' + savedSession.uid;
-                                db = JSON.parse(cachedDb) || blankDb();
-                                normalizeDb();
-                                document.getElementById('platformOwnerScreen').style.display = 'none';
-                                document.querySelector('.app').style.display = '';
-                                document.getElementById('authScreen').style.display = 'none';
-                                renderUserChip();
-                                applyRoleAccess();
-                                ensureAdminUserManagement();
-                                renderAll();
-                                setCloudStatus('Offline — data lokal');
-                                showToastOfflineNotice();
-                            } else {
-                                document.getElementById('authScreen').style.display = 'grid';
-                                showAuthMessage('Login pertama kali perlu internet. Setelah login online, aplikasi dapat dibuka offline pada perangkat ini.');
-                            }
-                        } catch (offlineError) {
-                            console.warn('Tidak dapat memulihkan sesi lokal:', offlineError);
-                            document.getElementById('authScreen').style.display = 'grid';
-                        }
-                    } else {
-                        document.getElementById('authScreen').style.display = 'grid';
-                    }
+                    // Tanpa sesi Firebase aktif, aplikasi tidak membuka data bisnis lokal.
+                    document.getElementById('authScreen').style.display = 'grid';
+                    if (!navigator.onLine) showAuthMessage('Koneksi internet diperlukan untuk login dan mengakses data Firestore.');
                     document.body.classList.remove('auth-checking');
                     return;
                 }
@@ -4983,7 +4936,6 @@ let pendingPurchaseBahanId = null;
                 sharedStockTransactions = (sharedStockTransactions || []).filter(t => !isTargetTransaction(t));
                 recalculateStockPeriods();
                 normalizeDb();
-                localStorage.setItem(KEY, JSON.stringify(db));
                 renderAll();
                 setCloudStatus('Tersinkron', true);
                 toast(documentsToDelete.length
@@ -5189,24 +5141,16 @@ let pendingPurchaseBahanId = null;
             if (idx >= 0) db.recipes[idx] = rec;
             else db.recipes.push(rec);
 
-            // Simpan lokal terlebih dahulu agar perubahan tidak hilang jika jaringan putus.
-            save();
-            closeModal();
-            renderAll();
-
-            // Jangan menyatakan berhasil di cloud sebelum sinkronisasi selesai.
-            if (currentUser?.uid && firebaseReady && navigator.onLine && !offlineLocalSession) {
-                clearTimeout(syncTimer);
-                await syncFirebase(true);
-                const stillPending = localStorage.getItem('ekasir_pending_sync_' + currentUser.uid) === '1';
+            // Tunggu konfirmasi Firestore sebelum menutup form atau menyatakan berhasil.
+            try {
+                const saved = await save();
+                if (!saved) return;
+                closeModal();
                 renderAll();
-                if (stillPending) {
-                    toast('Menu tersimpan di perangkat, tetapi sinkronisasi Firebase belum berhasil. Periksa status cloud.');
-                } else {
-                    toast('Menu & resep berhasil tersimpan di Firebase.');
-                }
-            } else {
-                toast('Menu tersimpan di perangkat. Sinkronisasi Firebase menunggu koneksi/login online.');
+                toast('Menu & resep berhasil tersimpan di Firestore.');
+            } catch (e) {
+                toast('Menu belum tersimpan. Perubahan dibatalkan saat data Firestore dimuat ulang.');
+                try { await loadFirebaseData(); renderAll(); } catch (_) {}
             }
         }
 
@@ -6494,7 +6438,6 @@ let pendingPurchaseBahanId = null;
                     address: db.settings.address,
                     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                 }, { merge: true });
-                localStorage.setItem(KEY, JSON.stringify(db));
                 renderAll();
                 toast('Pengaturan tersimpan');
             } catch (e) {
