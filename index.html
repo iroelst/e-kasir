@@ -3240,7 +3240,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
         // Hak akses menu berdasarkan role. Kasir dapat membuka Dashboard, Kasir, Pembelian, dan Laporan terbatas.
         function applyRoleAccess() {
             const kasir = isKasirClient();
-            const allowedKasirPages = ['dashboard', 'kasir', 'pembelian', 'pengeluaran', 'penjualan', 'laporan', 'keuangan']; // Tidak termasuk menu/resep, stok, dan pengaturan.
+            const allowedKasirPages = ['dashboard', 'kasir', 'pembelian', 'pengeluaran', 'penjualan', 'laporan', 'keuangan'];
             const openingTitle = document.getElementById('cashOpeningTitle');
             const openingHelp = document.getElementById('cashOpeningHelp');
             const entryTitle = document.getElementById('cashEntryTitle');
@@ -3266,7 +3266,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             const reportTitle = document.querySelector('#laporan .section-title h2');
             if (reportTitle) reportTitle.textContent = kasir ? 'Riwayat Transaksi & Omzet' : 'Laporan Berdasarkan Rentang Tanggal';
             const reportSubtitle = document.querySelector('#laporan .section-title small');
-            if (reportSubtitle) reportSubtitle.textContent = kasir ? 'Hanya menampilkan transaksi dan omzet yang dicatat oleh akun Anda.' : 'Pilih periode lalu cetak atau simpan sebagai PDF.';
+            if (reportSubtitle) reportSubtitle.textContent = kasir ? 'Pilih periode untuk melihat riwayat transaksi dan omzet.' : 'Pilih periode lalu cetak atau simpan sebagai PDF.';
         }
 
         function canAccessPage(page) {
@@ -3338,17 +3338,15 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             if (!currentUser || !firebaseReady) return;
             if (!navigator.onLine) {
                 setCloudStatus('Offline — data lokal');
-                return; // Jangan timpa data lokal dengan hasil baca yang gagal saat offline.
+                return;
             }
             setCloudStatus('Menghubungkan...');
             try {
-                // Hemat Reads: Admin memuat data toko untuk pengelolaan stok.
-                // Kasir hanya memuat dokumen miliknya; tidak mengunduh histori kasir lain.
                 const admin = isAdminClient();
-                const [
-                    menus, bahan, recipes, transactions, purchases, expenses,
-                    stockMoves, stockPeriods, settings, cashLedger
-                ] = await Promise.all([
+                // Admin membutuhkan histori seluruh toko untuk menghitung stok bersama.
+                // Kasir hanya membaca dokumen miliknya; tidak mengunduh histori kasir lain.
+                const [menus, bahan, recipes, transactions, purchases, expenses,
+                    stockMoves, stockPeriods, settings, cashLedger] = await Promise.all([
                     readCollection('menus'),
                     readCollection('bahan'),
                     readCollection('recipes'),
@@ -3360,26 +3358,13 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                     admin ? fbFs.doc('toko/' + SHOP_ID + '/settings/profile').get() : Promise.resolve({ exists: false }),
                     admin ? readCollection('cashLedger') : readOwnedCollection('cashLedger', 'ownerUid')
                 ]);
-                // Data bersama untuk kalkulasi stok hanya dimuat oleh Admin.
-                // Kasir tidak menghitung/mengubah stok dan hanya memakai data transaksi sendiri.
                 sharedStockTransactions = admin ? dedupeCloudRecords(transactions, 'transaction') : [];
                 sharedStockPurchases = admin ? dedupeCloudRecords(purchases, 'purchase') : [];
-                db.menus = menus.map(x => {
-                    delete x.__docId;
-                    return x
-                });
-                db.bahan = bahan.map(x => {
-                    delete x.__docId;
-                    return x
-                });
-                db.recipes = recipes.map(x => {
-                    delete x.__docId;
-                    return x
-                });
+                db.menus = menus.map(x => { delete x.__docId; return x; });
+                db.bahan = bahan.map(x => { delete x.__docId; return x; });
+                db.recipes = recipes.map(x => { delete x.__docId; return x; });
                 db.transactions = dedupeCloudRecords(transactions, 'transaction');
                 db.purchases = dedupeCloudRecords(purchases, 'purchase');
-                // Pertahankan __docId khusus pengeluaran agar edit/hapus selalu
-                // menyasar dokumen Firestore yang benar, termasuk dokumen legacy.
                 db.expenses = dedupeCloudRecords(expenses, 'expense');
                 db.cashLedger = cashLedger;
                 db.stockMoves = dedupeCloudRecords(stockMoves, 'purchase');
@@ -3387,24 +3372,19 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                 stockPeriods.forEach(x => {
                     const id = x.__docId;
                     delete x.__docId;
-                    db.stockPeriods[id] = x
+                    db.stockPeriods[id] = x;
                 });
-                if (settings.exists) db.settings = {
-                    ...db.settings,
-                    ...settings.data()
-                };
+                if (settings.exists) db.settings = { ...db.settings, ...settings.data() };
                 db.nextId = Math.max(1, ...[].concat(db.menus, db.bahan, db.transactions, db.purchases, db.expenses, db.stockMoves).map(x => +x.id || 0)) + 1;
                 normalizeDb();
-
-                // Hitung ulang saldo bulanan di memori saat pemuatan.
-                // Hindari menulis ulang seluruh periode ke Firebase setiap kali login.
-                recalculateStockPeriods();
-                await migrateUndefinedRecipes();
+                // Perhitungan periode stok hanya relevan bagi Admin.
+                if (admin) recalculateStockPeriods();
                 refreshFirestoreBaseline();
-                setCloudStatus('Tersinkron', true)
+                setCloudStatus('Tersinkron', true);
             } catch (e) {
-                console.error(e);
+                console.error('loadFirebaseData:', e);
                 setCloudStatus('Sinkron gagal');
+                throw e;
             }
         }
         async function migrateUndefinedRecipes() {
@@ -3821,6 +3801,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
         // Stok bahan adalah stok bersama: semua kasir memakai penjualan dan pembelian
         // yang sama, tanpa mengubah pembatasan akses pada laporan/kelola transaksi.
         function stockTransactions(from, to) {
+            if (!isAdminClient()) return [];
             // Gabungkan data bersama dari cloud dengan transaksi lokal terbaru yang belum tersinkron.
             const byId = new Map();
             // Data lokal dimasukkan lebih dulu; snapshot cloud yang lebih baru
@@ -3834,6 +3815,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
         }
 
         function stockPurchases(from, to) {
+            if (!isAdminClient()) return [];
             const byId = new Map();
             // Snapshot cloud mengalahkan cache lokal untuk ID yang sama.
             [...(db.purchases || []), ...(sharedStockPurchases || [])].forEach(p => {
@@ -4664,7 +4646,6 @@ let pendingPurchaseBahanId = null;
         }
 
         function changeStockRange() {
-            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengatur periode stok.');
             const r = getRange();
             if (r.from > r.to) return toast('Tanggal awal tidak boleh melewati tanggal akhir');
             ensurePeriod(rangeKey(r.from, r.to), r.from, r.to);
@@ -4673,7 +4654,6 @@ let pendingPurchaseBahanId = null;
         }
 
         function openOpeningModal() {
-            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengubah stok awal.');
             const r = getRange(),
                 key = rangeKey(r.from, r.to),
                 p = ensurePeriod(key, r.from, r.to);
@@ -4792,7 +4772,6 @@ let pendingPurchaseBahanId = null;
         }
 
         function saveOpening() {
-            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengubah stok awal.');
             const r = getRange(),
                 key = rangeKey(r.from, r.to),
                 p = ensurePeriod(key, r.from, r.to),
@@ -5294,7 +5273,6 @@ let pendingPurchaseBahanId = null;
         }
 
         function openBahanModal(id = null) {
-            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengelola data bahan.');
             let b = id ? db.bahan.find(x => x.id === id) : {
                 name: '',
                 unit: 'gram',
@@ -5317,12 +5295,10 @@ let pendingPurchaseBahanId = null;
         }
 
         function editBahan(id) {
-            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengelola data bahan.');
             openBahanModal(id)
         }
 
         function saveBahan(id) {
-            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengelola data bahan.');
             const old = id ? db.bahan.find(b => b.id === id) : null;
             const nameEl = document.getElementById('bName');
             const unitEl = document.getElementById('bUnit');
@@ -5434,7 +5410,6 @@ let pendingPurchaseBahanId = null;
         }
 
         function recalculateStockPeriods() {
-            if (!isAdminClient()) return toast('Hanya Admin yang dapat menghitung ulang stok.');
             const startMonth = getStockStartMonth();
             const startDate = startMonth ? `${startMonth}-01` : '';
             const periods = Object.values(db.stockPeriods || {}).filter(p => {
