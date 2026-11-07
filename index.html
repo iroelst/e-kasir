@@ -4679,7 +4679,7 @@ let pendingPurchaseBahanId = null;
                 usageTotal += uv;
                 endingTotal += ev;
                 const safe = x.ending > (+b.min || 0);
-                return `<tr><td><b>${b.name}</b></td><td>${formatQty(b.content)} ${b.unit}</td><td>${rupiah(averageUnitCost(b, r.to) * (+b.content || 0))}</td><td>${formatQty(x.opening)} ${b.unit}</td><td>${formatQty(x.purchases)} ${b.unit}</td><td>${formatQty(x.used)} ${b.unit}</td><td><b>${formatQty(Math.max(0,x.ending))} ${b.unit}</b></td><td><b>${rupiah(ev)}</b></td><td><span class="badge ${safe?'ok':'warn'}">${safe?'Aman':'Menipis'}</span></td><td><button class="btn" onclick="editBahan(${b.id})">Edit</button></td></tr>`
+                return `<tr><td><b>${b.name}</b></td><td>${formatQty(b.content)} ${b.unit}</td><td>${rupiah(averageUnitCost(b, r.to) * (+b.content || 0))}</td><td>${formatQty(x.opening)} ${b.unit}</td><td>${formatQty(x.purchases)} ${b.unit}</td><td>${formatQty(x.used)} ${b.unit}</td><td><b>${formatQty(Math.max(0,x.ending))} ${b.unit}</b></td><td><b>${rupiah(ev)}</b></td><td><span class="badge ${safe?'ok':'warn'}">${safe?'Aman':'Menipis'}</span></td><td><button class="btn" onclick="editBahan(${JSON.stringify(b.id)})">Edit</button></td></tr>`
             }).join('') || '<tr><td colspan="10"><div class="empty">Belum ada bahan. Tambahkan bahan terlebih dahulu.</div></td></tr>';
             stockOpeningTotal.textContent = rupiah(openingTotal);
             stockPurchaseTotal.textContent = rupiah(purchaseTotal);
@@ -5376,7 +5376,7 @@ let pendingPurchaseBahanId = null;
 
         function openBahanModal(id = null) {
             if (!isAdminClient()) return toast('Hanya Admin yang dapat mengelola master bahan.');
-            let b = id ? db.bahan.find(x => x.id === id) : {
+            let b = id !== null && id !== undefined && id !== 0 ? db.bahan.find(x => String(x.id) === String(id)) : {
                 name: '',
                 unit: 'gram',
                 content: '',
@@ -5420,26 +5420,34 @@ let pendingPurchaseBahanId = null;
             if (unit === 'pcs' && !Number.isInteger(content)) return toast('Isi kemasan untuk satuan pcs harus bilangan bulat.');
             if (!Number.isFinite(cost) || cost < 0) return toast('Harga kemasan tidak valid');
             if (!Number.isFinite(min) || min < 0) return toast('Minimum stok tidak valid.');
+            const isEdit = id !== null && id !== undefined && id !== 0;
+            if (isEdit && !old) return toast('Data bahan yang akan diedit tidak ditemukan. Muat ulang data lalu coba lagi.');
             const x = {
-                id: id || db.nextId++,
+                ...(old || {}),
+                id: isEdit ? old.id : db.nextId++,
                 name,
                 unit,
                 content,
                 cost,
                 min
             };
-            if (id) db.bahan = db.bahan.map(b => b.id === id ? x : b);
+            if (isEdit) db.bahan = db.bahan.map(b => String(b.id) === String(id) ? x : b);
             else db.bahan.push(x);
-            await save();
-            const goBack = returnToPurchase;
-            if (goBack && !id) pendingPurchaseBahanId = x.id;
-            returnToPurchase = false;
-            closeModal();
-            renderAll();
-            if (goBack) {
-                openPurchaseModal();
-                toast('Bahan ditambahkan. Silakan isi pembelian');
-            } else toast('Bahan tersimpan');
+            try {
+                await save();
+                const goBack = returnToPurchase;
+                if (goBack && !isEdit) pendingPurchaseBahanId = x.id;
+                returnToPurchase = false;
+                closeModal();
+                renderAll();
+                if (goBack) {
+                    openPurchaseModal();
+                    toast('Bahan ditambahkan. Silakan isi pembelian');
+                } else toast(isEdit ? 'Perubahan bahan berhasil disimpan.' : 'Bahan berhasil disimpan.');
+            } catch (e) {
+                // save() menampilkan pesan kegagalan dan memulihkan data terakhir dari Firestore.
+                console.error('Gagal menyimpan bahan:', e);
+            }
         }
 
         function openBahanForPurchase() {
