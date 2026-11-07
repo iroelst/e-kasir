@@ -3897,7 +3897,7 @@ let pendingPurchaseBahanId = null;
             let e = document.getElementById('toast');
             e.textContent = s;
             e.classList.add('show');
-            setTimeout(() => e.classList.remove('show'), 1800)
+            setTimeout(() => e.classList.remove('show'), 2800)
         }
 
         function go(page) {
@@ -4624,18 +4624,12 @@ let pendingPurchaseBahanId = null;
         }
 
         function openOpeningModal() {
-            const r = getRange(),
-                key = rangeKey(r.from, r.to),
-                p = ensurePeriod(key, r.from, r.to);
+            // Saldo manual hanya boleh diinput satu kali pada bulan mulai usaha.
+            // Bulan berikutnya selalu mengikuti stok akhir bulan sebelumnya.
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengisi stok awal.');
             const startMonth = getStockStartMonth();
-            const startDate = startMonth ? `${startMonth}-01` : '';
-            const prior = Object.values(db.stockPeriods).filter(x => x && x.to && x.to < r.from && (!startDate || x.to >= startDate)).sort((a, b) => String(b.to).localeCompare(String(a.to)))[0];
-            if (prior && prior.ending && Object.keys(prior.ending).length) return toast('Stok awal periode ini otomatis mengikuti stok akhir periode sebelumnya');
-            const fields = db.bahan.map(b => {
-                const v = p.opening[b.id] ?? 0;
-                return `<div class="form-grid" style="margin-bottom:8px"><div class="field"><label>${b.name}</label><small style="color:var(--muted)">Isi kemasan ${formatQty(b.content)} ${b.unit} · ${rupiah(b.cost)}/kemasan</small></div><div class="field"><label>STOK AWAL (${b.unit})</label><input id="open_${b.id}" type="number" step="${b.unit==='pcs'?'1':'0.01'}" min="0" value="${v}" oninput="updateOpeningValue(${b.id})"><small id="openVal_${b.id}" style="color:var(--muted)">${rupiah(stockValue(b,v))}</small></div></div>`
-            }).join('');
-            openModal('Form Stok Awal', `<p style="margin-top:0;color:var(--muted);font-size:13px"><b>Stok Awal</b> adalah stok fisik yang sudah tersedia sebelum aplikasi digunakan. Stok ini <b>bukan pembelian</b>, tidak masuk Riwayat Pembelian, dan setelah disimpan langsung masuk ke Tampil Stok.</p><div class="field"><label>TANGGAL STOK AWAL</label><input id="openingDate" type="date" value="${p.openingDate||r.from}" min="${r.from}" max="${r.to}"></div><div style="margin-top:12px">${fields||'<div class="empty">Belum ada bahan. <button class="btn" onclick="closeModal();openBahanModal()">＋ Tambah Bahan</button></div>'}</div><button class="btn primary" style="margin-top:15px" onclick="saveOpening()">Simpan Stok Awal</button>`);
+            if (!startMonth) return manageInitialStockSetup();
+            return openInitialOpeningModal();
         }
 
         // Bulan mulai stok disimpan pada settings/profile sehingga berlaku per usaha/tenant.
@@ -4678,6 +4672,7 @@ let pendingPurchaseBahanId = null;
             await save();
             closeModal();
             renderAll();
+            toast(`Bulan mulai stok ${month} berhasil disimpan.`);
             openInitialOpeningModal();
         }
 
@@ -4731,7 +4726,7 @@ let pendingPurchaseBahanId = null;
             await save();
             closeModal();
             renderAll();
-            toast(`Stok awal ${month} diperbarui. Saldo bulan berikutnya dihitung ulang.`);
+            toast(`Data stok awal berhasil disimpan. Saldo bulan berikutnya dihitung ulang otomatis.`);
         }
 
         function updateOpeningValue(id) {
@@ -4763,7 +4758,7 @@ let pendingPurchaseBahanId = null;
             await save();
             closeModal();
             renderAll();
-            toast('Stok awal tersimpan')
+            toast('Data stok awal berhasil disimpan di Firebase.')
         }
 
         function setHistoryRange(fromId, toId) {
@@ -5477,42 +5472,55 @@ let pendingPurchaseBahanId = null;
 
         function recalculateStockPeriods() {
             const startMonth = getStockStartMonth();
-            const startDate = startMonth ? `${startMonth}-01` : '';
-            const periods = Object.values(db.stockPeriods || {}).filter(p => {
-                if (!p || !p.from || !p.to || (startDate && p.to < startDate)) return false;
-                // Rantai saldo hanya berlaku untuk periode satu bulan kalender.
-                // Rentang laporan kustom (mis. Januari-November) tidak boleh
-                // diperlakukan sebagai bulan tambahan karena dapat menggandakan stok.
-                const [year, month, day] = String(p.from).split('-').map(Number);
-                if (day !== 1) return false;
-                const lastDay = new Date(year, month, 0).getDate();
-                return p.to === `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
-            }).sort((a, b) => String(a.from).localeCompare(String(b.from)) || String(a.to).localeCompare(String(b.to)));
-            let previousEnding = {};
-            periods.forEach(p => {
-                if (startDate && p.from < startDate) return;
+            if (!startMonth || !/^\d{4}-\d{2}$/.test(startMonth)) return;
+            const startDate = `${startMonth}-01`;
 
-                // Hanya periode pertama yang memakai stok awal manual.
-                // Semua periode sesudahnya mengambil saldo akhir periode sebelumnya,
-                // walaupun sebelumnya pernah tersimpan openingDate/stok awal manual.
-                if (p.from !== startDate && Object.keys(previousEnding).length) {
-                    p.opening = JSON.parse(JSON.stringify(previousEnding));
-                    p.openingDate = null;
+            // Bentuk rantai periode bulanan tanpa celah. Jika suatu bulan tidak pernah
+            // dibuka di aplikasi, pembelian dan pemakaian bulan tersebut tetap dihitung
+            // sebelum saldo dibawa ke bulan berikutnya.
+            const relevantDates = [today()];
+            (db.purchases || []).forEach(x => { if (x?.date) relevantDates.push(String(x.date)); });
+            (sharedStockPurchases || []).forEach(x => { if (x?.date) relevantDates.push(String(x.date)); });
+            (db.transactions || []).forEach(x => { if (x?.date) relevantDates.push(String(x.date)); });
+            (sharedStockTransactions || []).forEach(x => { if (x?.date) relevantDates.push(String(x.date)); });
+            Object.values(db.stockPeriods || {}).forEach(x => { if (x?.to) relevantDates.push(String(x.to)); });
+            const maxDate = relevantDates.filter(x => /^\d{4}-\d{2}-\d{2}$/.test(x)).sort().pop() || today();
+            const maxMonth = maxDate.slice(0, 7);
+            const [sy, sm] = startMonth.split('-').map(Number);
+            const [ey, em] = maxMonth.split('-').map(Number);
+            let year = sy, month = sm;
+            let previousEnding = null;
+
+            while (year < ey || (year === ey && month <= em)) {
+                const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+                const from = `${monthKey}-01`;
+                const to = `${monthKey}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
+                const key = rangeKey(from, to);
+                let period = db.stockPeriods[key];
+                if (!period) {
+                    period = db.stockPeriods[key] = { from, to, opening: {}, openingDate: null, ending: {} };
                 }
 
-                p.opening = p.opening && typeof p.opening === 'object' ? p.opening : {};
+                if (monthKey !== startMonth && previousEnding) {
+                    period.opening = JSON.parse(JSON.stringify(previousEnding));
+                    period.openingDate = null;
+                }
+                period.opening = period.opening && typeof period.opening === 'object' ? period.opening : {};
                 const ending = {};
                 db.bahan.forEach(b => {
-                    const opening = +(p.opening[b.id] ?? 0);
-                    const purchases = stockPurchases(p.from, p.to)
+                    const opening = Number(period.opening[b.id] ?? 0);
+                    const purchases = stockPurchases(from, to)
                         .filter(x => String(x.bahanId) === String(b.id))
-                        .reduce((a, x) => a + (+x.qty || 0), 0);
-                    const used = usageForRange(b, p.from, p.to);
+                        .reduce((sum, x) => sum + (Number(x.qty) || 0), 0);
+                    const used = usageForRange(b, from, to);
                     ending[b.id] = opening + purchases - used;
                 });
-                p.ending = ending;
+                period.ending = ending;
                 previousEnding = ending;
-            });
+
+                month++;
+                if (month > 12) { month = 1; year++; }
+            }
         }
 
         function syncPurchaseToStockMove(purchase) {
