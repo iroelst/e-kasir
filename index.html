@@ -6190,6 +6190,11 @@ let pendingPurchaseBahanId = null;
     .total { font-size: ${width === 57 ? '12px' : '14px'}; }
     .thanks { margin: 5px 0 0; }
     @media print { .no-print { display:none !important; } html, body { margin: 0; padding: 0; background:#fff; } .receipt { margin: 0; width: ${width - 6}mm; } }
+
+        /* FIX: notifikasi harus tampil di atas modal saat penyimpanan gagal */
+        .toast {
+            z-index: 100000 !important;
+        }
 </style></head><body><div class="toolbar no-print"><label for="paperWidth">Ukuran:</label><select id="paperWidth" onchange="setWidth(this.value)"><option value="57" ${width===57?'selected':''}>Thermal 57 mm</option><option value="80" ${width===80?'selected':''}>Thermal 80 mm</option></select><button onclick="window.print()">Cetak Nota</button></div>${receipt}
 <script>
     function setWidth(value) {
