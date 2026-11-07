@@ -5819,6 +5819,8 @@ let pendingPurchaseBahanId = null;
                 const detail = error?.message ? String(error.message) : String(error || 'Kesalahan tidak diketahui');
                 const diagnostic = 'Gagal menyimpan pengeluaran [' + code + ']: ' + detail;
                 try { toast(diagnostic); } catch (toastError) { console.error('Toast error:', toastError); }
+                // Diagnostik sementara: alert tetap terlihat meskipun toast tertutup/tertutup UI.
+                try { window.alert(diagnostic); } catch (alertError) { console.error('Alert error:', alertError); }
                 try {
                     const body = document.getElementById('modalBody');
                     if (body) {
