@@ -5383,7 +5383,31 @@ let pendingPurchaseBahanId = null;
                 cost: '',
                 min: ''
             };
-            openModal(id ? 'Edit Bahan' : 'Tambah Bahan', `<div class="form-grid"><div class="field"><label>NAMA BAHAN</label><input id="bName" value="${b.name}"></div><div class="field"><label>SATUAN DASAR</label><select id="bUnit"><option value="gram" ${b.unit==='gram'?'selected':''}>gram</option><option value="ml" ${b.unit==='ml'?'selected':''}>ml</option><option value="pcs" ${b.unit==='pcs'?'selected':''}>pcs</option></select></div><div class="field"><label>ISI 1 KEMASAN</label><input id="bContent" type="number" step="${b.unit==='pcs'?'1':'0.01'}" min="${b.unit==='pcs'?'1':'0.01'}" value="${b.content||''}" placeholder="Contoh: 1000"><small style="color:var(--muted)">Contoh: 1000 gram, 1000 ml, atau 50 pcs</small></div><div class="field"><label>HARGA 1 KEMASAN</label><input id="bCost" type="number" min="0" value="${b.cost}"></div><div class="field"><label>MINIMUM STOK (${b.unit})</label><input id="bMin" type="number" step="0.01" min="0" value="${b.min}"></div></div><div style="margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:var(--muted);font-size:13px">Harga dasar otomatis: <b id="baseCostPreview">-</b> / ${b.unit}</div><button type="button" class="btn primary" style="margin-top:15px" data-bahan-id="${id !== null && id !== undefined ? escapeHtml(String(id)) : '0'}" onclick="window.saveBahan(this.getAttribute('data-bahan-id'))">Simpan</button>`);
+            openModal(id ? 'Edit Bahan' : 'Tambah Bahan', `<div class="form-grid"><div class="field"><label>NAMA BAHAN</label><input id="bName" value="${b.name}"></div><div class="field"><label>SATUAN DASAR</label><select id="bUnit"><option value="gram" ${b.unit==='gram'?'selected':''}>gram</option><option value="ml" ${b.unit==='ml'?'selected':''}>ml</option><option value="pcs" ${b.unit==='pcs'?'selected':''}>pcs</option></select></div><div class="field"><label>ISI 1 KEMASAN</label><input id="bContent" type="number" step="${b.unit==='pcs'?'1':'0.01'}" min="${b.unit==='pcs'?'1':'0.01'}" value="${b.content||''}" placeholder="Contoh: 1000"><small style="color:var(--muted)">Contoh: 1000 gram, 1000 ml, atau 50 pcs</small></div><div class="field"><label>HARGA 1 KEMASAN</label><input id="bCost" type="number" min="0" value="${b.cost}"></div><div class="field"><label>MINIMUM STOK (${b.unit})</label><input id="bMin" type="number" step="0.01" min="0" value="${b.min}"></div></div><div style="margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:var(--muted);font-size:13px">Harga dasar otomatis: <b id="baseCostPreview">-</b> / ${b.unit}</div><button type="button" id="saveBahanBtn" class="btn primary" style="margin-top:15px">Simpan</button>`);
+            // Pasang listener langsung pada tombol modal. Tidak bergantung pada
+            // inline onclick / global handler yang dapat gagal saat modal dirender.
+            const saveBahanBtn = document.getElementById('saveBahanBtn');
+            if (saveBahanBtn) {
+                saveBahanBtn.addEventListener('click', async (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (saveBahanBtn.disabled) return;
+                    saveBahanBtn.disabled = true;
+                    const originalText = saveBahanBtn.textContent;
+                    saveBahanBtn.textContent = 'Menyimpan...';
+                    try {
+                        await saveBahan(id);
+                    } catch (error) {
+                        console.error('Klik Simpan Bahan gagal:', error);
+                        toast('Gagal menyimpan bahan: ' + (error?.message || 'Kesalahan tidak diketahui'));
+                    } finally {
+                        if (document.body.contains(saveBahanBtn)) {
+                            saveBahanBtn.disabled = false;
+                            saveBahanBtn.textContent = originalText;
+                        }
+                    }
+                });
+            }
             const update = () => {
                 const c = +(document.getElementById('bContent')?.value || 0),
                     p = +(document.getElementById('bCost')?.value || 0),
@@ -5422,7 +5446,7 @@ let pendingPurchaseBahanId = null;
             if (unit === 'pcs' && !Number.isInteger(content)) return toast('Isi kemasan untuk satuan pcs harus bilangan bulat.');
             if (!Number.isFinite(cost) || cost < 0) return toast('Harga kemasan tidak valid');
             if (!Number.isFinite(min) || min < 0) return toast('Minimum stok tidak valid.');
-            const isEdit = id !== null && id !== undefined && id !== 0;
+            const isEdit = id !== null && id !== undefined && String(id) !== '0' && id !== 0;
             if (isEdit && !old) return toast('Data bahan yang akan diedit tidak ditemukan. Muat ulang data lalu coba lagi.');
             const x = {
                 ...(old || {}),
@@ -5449,6 +5473,7 @@ let pendingPurchaseBahanId = null;
             } catch (e) {
                 // save() menampilkan pesan kegagalan dan memulihkan data terakhir dari Firestore.
                 console.error('Gagal menyimpan bahan:', e);
+                throw e;
             }
         }
 
