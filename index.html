@@ -2938,6 +2938,9 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             currentUserName = '',
             KEY = BASE_KEY,
             db = {};
+        // Antrean penyimpanan langsung Firestore; harus tersedia sebelum save() dipanggil.
+        let directSaveQueue = Promise.resolve();
+        let lastCommittedDb = null;
         // Salinan bersama khusus perhitungan stok; laporan kasir tetap memakai data miliknya.
         let sharedStockTransactions = [];
         let sharedStockPurchases = [];
