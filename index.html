@@ -5115,6 +5115,69 @@ let pendingPurchaseBahanId = null;
             }
         }
 
+        function openTransactionEdit(id, ownerUid = '') {
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengedit transaksi penjualan.');
+            const t = findTransactionRecord(id, ownerUid);
+            if (!t) return toast('Transaksi tidak ditemukan. Muat ulang data lalu coba lagi.');
+            const rows = (t.items || []).map((item, i) => `<div class="form-grid" style="padding:9px 0;border-bottom:1px solid var(--line)"><div class="field"><label>MENU</label><input value="${escapeHtml(item.name || '')}" disabled></div><div class="field"><label>JUMLAH</label><input id="txEditQty${i}" type="number" min="0.01" step="0.01" value="${Number(item.qty)||0}"></div><div class="field"><label>HARGA JUAL / PORSI</label><input id="txEditPrice${i}" type="number" min="0" step="1" value="${Number(item.price)||0}"></div></div>`).join('');
+            openModal('Edit Riwayat Penjualan', `<p style="margin-top:0;color:var(--muted);font-size:13px">Admin dapat mengubah tanggal, jumlah, dan harga item. Pembayaran yang sudah tercatat tetap dipertahankan. Total baru tidak boleh lebih kecil dari jumlah yang sudah dibayar.</p><div class="field"><label>TANGGAL TRANSAKSI</label><input id="txEditDate" type="date" value="${escapeHtml(t.date || today())}"></div><div style="margin-top:10px">${rows || '<div class="empty">Item transaksi tidak tersedia.</div>'}</div><button class="btn primary" style="margin-top:14px" onclick="saveTransactionEdit('${String(t.id).replace(/[^A-Za-z0-9_-]/g,'')}','${String(ownerUid || t.cashierUid || t.createdByUid || '').replace(/[^A-Za-z0-9_-]/g,'')}')">Simpan Perubahan</button>`);
+        }
+
+        async function saveTransactionEdit(id, ownerUid = '') {
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengedit transaksi penjualan.');
+            try {
+                requireOnlineCheckout();
+                const original = findTransactionRecord(id, ownerUid);
+                if (!original) return toast('Transaksi tidak ditemukan.');
+                const date = document.getElementById('txEditDate')?.value || '';
+                if (!date) return toast('Tanggal transaksi wajib diisi.');
+                const items = (original.items || []).map((item, i) => {
+                    const qty = Number(document.getElementById('txEditQty' + i)?.value);
+                    const price = Number(document.getElementById('txEditPrice' + i)?.value);
+                    if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price < 0) throw new Error('Jumlah dan harga setiap item harus valid.');
+                    return { ...item, qty, price };
+                });
+                const total = items.reduce((sum, item) => sum + (Number(item.qty)||0) * (Number(item.price)||0), 0);
+                const hpp = items.reduce((sum, item) => sum + (Number(item.qty)||0) * (Number(item.hpp)||0), 0);
+                const paidAmount = getNetPaidAmount(original);
+                if (total + 1e-9 < paidAmount) return toast('Total baru tidak boleh lebih kecil dari pembayaran yang sudah diterima (' + rupiah(paidAmount) + ').');
+                const updated = { ...original, date, items, total, hpp, status: paidAmount >= total ? 'lunas' : paidAmount > 0 ? 'sebagian' : 'belum bayar' };
+                const owner = String(original.cashierUid || original.createdByUid || '');
+                const ref = colRef('transactions');
+                let target = owner ? ref.doc(owner + '__' + String(original.id)) : ref.doc(String(original.id));
+                let snap = await target.get();
+                if (!snap.exists) {
+                    const direct = await ref.doc(String(original.id)).get();
+                    if (direct.exists) { target = direct.ref; snap = direct; }
+                }
+                if (!snap.exists) {
+                    const query = await ref.where('id', '==', original.id).get();
+                    const match = query.docs.find(d => {
+                        const data = d.data() || {};
+                        return String(data.cashierUid || data.createdByUid || '') === owner;
+                    });
+                    if (match) { target = match.ref; snap = match; }
+                }
+                if (!snap.exists) throw new Error('Dokumen transaksi tidak ditemukan di Firestore.');
+                const remote = snap.data() || {};
+                if (String(remote.id) !== String(original.id) || String(remote.cashierUid || remote.createdByUid || '') !== owner) throw new Error('Identitas/pemilik transaksi di Firestore tidak cocok.');
+                const { __docId, ...payload } = updated;
+                await target.set(payload, { merge: true });
+                const idx = db.transactions.findIndex(x => String(x.id) === String(original.id) && String(x.cashierUid || x.createdByUid || '') === owner);
+                if (idx >= 0) db.transactions[idx] = updated;
+                sharedStockTransactions = [...(sharedStockTransactions || []).filter(x => !(String(x.id) === String(original.id) && String(x.cashierUid || x.createdByUid || '') === owner)), updated];
+                recalculateStockPeriods();
+                normalizeDb();
+                localStorage.setItem(KEY, JSON.stringify(db));
+                lastCommittedDb = cloneDb(db);
+                closeModal(); renderAll(); setCloudStatus('Transaksi diperbarui di Firestore', true);
+                toast('Riwayat penjualan berhasil diperbarui. Stok dan laporan dihitung ulang.');
+            } catch (e) {
+                console.error('Edit transaksi gagal:', e);
+                toast('Perubahan transaksi gagal disimpan: ' + (e.message || 'Periksa koneksi dan Firestore Rules.'));
+            }
+        }
+
         // Rekap penerimaan berdasarkan metode pembayaran pada periode laporan.
         // Yang dihitung adalah uang yang benar-benar dibayar, bukan sisa tagihan.
         function getPaymentMethodTotals(transactions) {
@@ -5158,7 +5221,7 @@ let pendingPurchaseBahanId = null;
                 const label = status === 'lunas' ? 'Lunas' : status === 'sebagian' ? 'Belum Lunas' : 'Belum Bayar';
                 const remaining = Math.max(0, (+t.total || 0) - (+t.paidAmount || 0));
                 const ownerUid = String(t.cashierUid || t.createdByUid || '').replace(/[^A-Za-z0-9_-]/g, '');
-                return `<tr><td>${formatDateID(t.date)} ${t.time}</td><td>${escapeHtml(t.cashierName || '—')}</td><td>${(t.items || []).map(i=>escapeHtml(i.name)+' ×'+i.qty).join(', ')}</td><td>${escapeHtml(t.pay || '')}</td><td><span class="badge ${cls}">${label}</span></td><td>${remaining ? rupiah(remaining) : '-'}</td><td><b>${rupiah(t.total)}</b></td>${kasirView ? '' : `<td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td>`}<td class="no-print"><div style="display:flex;gap:5px;flex-wrap:wrap"><button class="btn" onclick="printThermal('${t.id}',80,'${ownerUid}')">🧾 Nota</button>${status !== 'lunas' ? `<button class="btn" onclick="openSettlePayment('${t.id}','${ownerUid}')">💳 Bayar</button>` : ''}${canManageTransactionRecord(t) ? `<button class="btn danger" data-transaction-id="${escapeHtml(String(t.id))}" data-owner-uid="${escapeHtml(ownerUid)}" onclick="deleteTransaction(this.dataset.transactionId,this.dataset.ownerUid)">🗑️ Hapus</button>` : ''}</div></td></tr>`;
+                return `<tr><td>${formatDateID(t.date)} ${t.time}</td><td>${escapeHtml(t.cashierName || '—')}</td><td>${(t.items || []).map(i=>escapeHtml(i.name)+' ×'+i.qty).join(', ')}</td><td>${escapeHtml(t.pay || '')}</td><td><span class="badge ${cls}">${label}</span></td><td>${remaining ? rupiah(remaining) : '-'}</td><td><b>${rupiah(t.total)}</b></td>${kasirView ? '' : `<td>${rupiah(t.hpp)}</td><td><b>${rupiah(t.total-t.hpp)}</b></td>`}<td class="no-print"><div style="display:flex;gap:5px;flex-wrap:wrap"><button class="btn" onclick="printThermal('${t.id}',80,'${ownerUid}')">🧾 Nota</button>${status !== 'lunas' ? `<button class="btn" onclick="openSettlePayment('${t.id}','${ownerUid}')">💳 Bayar</button>` : ''}${canManageTransactionRecord(t) ? `<button class="btn" data-transaction-id="${escapeHtml(String(t.id))}" data-owner-uid="${escapeHtml(ownerUid)}" onclick="openTransactionEdit(this.dataset.transactionId,this.dataset.ownerUid)">✏️ Edit</button><button class="btn danger" data-transaction-id="${escapeHtml(String(t.id))}" data-owner-uid="${escapeHtml(ownerUid)}" onclick="deleteTransaction(this.dataset.transactionId,this.dataset.ownerUid)">🗑️ Hapus</button>` : ''}</div></td></tr>`;
             }).join('') || `<tr><td colspan="${kasirView ? 8 : 10}"><div class="empty">Belum ada transaksi pada periode ini.</div></td></tr>`;
         }
 
@@ -6188,6 +6251,47 @@ let pendingPurchaseBahanId = null;
             renderAll(); toast('Transaksi kas berhasil disimpan.');
         }
 
+        function openCashLedgerEdit(id) {
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengelola transaksi kas.');
+            const row = (db.cashLedger || []).find(x => String(x.id) === String(id));
+            if (!row) return toast('Transaksi kas tidak ditemukan.');
+            const typeLabel = row.type === 'opening' ? 'Saldo awal' : row.type === 'modal' ? 'Tambah modal' : row.type === 'setor' ? 'Setor kas' : 'Transfer antar kas';
+            openModal('Edit ' + typeLabel, `<div class="form-grid"><div class="field"><label>TANGGAL</label><input id="ledgerEditDate" type="date" value="${escapeHtml(row.date || today())}"></div><div class="field"><label>NOMINAL (RP)</label><input id="ledgerEditAmount" type="number" min="0" step="1" value="${Number(row.amount)||0}"></div><div class="field full"><label>KETERANGAN</label><input id="ledgerEditNote" value="${escapeHtml(row.note || '')}"></div></div><p style="font-size:12px;color:var(--muted)">Jenis transaksi dan akun asal/tujuan tidak diubah agar histori transfer tetap konsisten.</p><button class="btn primary" onclick="saveCashLedgerEdit('${String(id).replace(/[^A-Za-z0-9_-]/g,'')}')">Simpan Perubahan</button>`);
+        }
+
+        async function saveCashLedgerEdit(id) {
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat mengelola transaksi kas.');
+            const idx = (db.cashLedger || []).findIndex(x => String(x.id) === String(id));
+            if (idx < 0) return toast('Transaksi kas tidak ditemukan.');
+            const date = document.getElementById('ledgerEditDate')?.value || '';
+            const amount = Number(document.getElementById('ledgerEditAmount')?.value);
+            if (!date || !Number.isFinite(amount) || amount < 0) return toast('Tanggal atau nominal tidak valid.');
+            const before = cloneDb(db);
+            const row = { ...db.cashLedger[idx], date, amount, note: (document.getElementById('ledgerEditNote')?.value || '').trim(), updatedAt: new Date().toISOString() };
+            db.cashLedger[idx] = row;
+            if (row.type === 'opening') {
+                if (row.cashAccountType === 'kasir' && row.cashAccountUid) db.settings.cashOpeningByUser[row.cashAccountUid] = { ...(db.settings.cashOpeningByUser[row.cashAccountUid] || {}), date, amount };
+                else db.settings.cashOpening = { ...(db.settings.cashOpening || {}), date, amount };
+            }
+            try { await save(); closeModal(); renderAll(); toast('Transaksi kas berhasil diperbarui di Firestore.'); }
+            catch (e) { db = before; normalizeDb(); renderAll(); }
+        }
+
+        async function deleteCashLedgerRecord(id) {
+            if (!isAdminClient()) return toast('Hanya Admin yang dapat menghapus transaksi kas.');
+            const row = (db.cashLedger || []).find(x => String(x.id) === String(id));
+            if (!row) return toast('Transaksi kas tidak ditemukan.');
+            if (!confirm(`Hapus transaksi kas ${row.type} sebesar ${rupiah(row.amount)} tanggal ${formatDateID(row.date)}? Saldo kas dan laporan terkait akan dihitung ulang.`)) return;
+            const before = cloneDb(db);
+            db.cashLedger = db.cashLedger.filter(x => String(x.id) !== String(id));
+            if (row.type === 'opening') {
+                if (row.cashAccountType === 'kasir' && row.cashAccountUid) db.settings.cashOpeningByUser[row.cashAccountUid] = { date: row.date || today(), amount: 0, createdByUid: row.cashAccountUid };
+                else db.settings.cashOpening = { date: row.date || today(), amount: 0 };
+            }
+            try { await save(); renderAll(); toast('Transaksi kas dihapus dari Firestore.'); }
+            catch (e) { db = before; normalizeDb(); renderAll(); }
+        }
+
         function cashReportRange() {
             const from = document.getElementById('cashReportFrom')?.value || defaultRange().from;
             const to = document.getElementById('cashReportTo')?.value || defaultRange().to;
@@ -6275,19 +6379,19 @@ let pendingPurchaseBahanId = null;
                     if (isFrom) { keluar=Number(x.amount)||0; label='Transfer ke kasir'; }
                     if (isTo) { masuk=Number(x.amount)||0; label='Transfer dari admin'; }
                 }
-                if (masuk || keluar) rows.push({date:x.date, cashierName:x.ownerName || x.createdByName || '—', type:label, note:x.note || '-', masuk, keluar, order:0});
+                if (masuk || keluar) rows.push({date:x.date, cashierName:x.ownerName || x.createdByName || '—', type:label, note:x.note || '-', masuk, keluar, order:0, source:'ledger', sourceId:String(x.id), sourceOwner:String(x.ownerUid || x.cashAccountUid || '')});
             });
             (db.transactions || []).filter(t => recordBelongsToCurrentUser(t,'transaction') && t.date >= from && t.date <= to).forEach(t => {
                 const cashReceived = getCashPaidAmount(t);
-                if (cashReceived > 0) rows.push({date:t.date,cashierName:t.cashierName||'—',type:'Penjualan tunai',note:(t.items||[]).map(i=>`${i.name} ×${i.qty}`).join(', '),masuk:cashReceived,keluar:0,order:1});
+                if (cashReceived > 0) rows.push({date:t.date,cashierName:t.cashierName||'—',type:'Penjualan tunai',note:(t.items||[]).map(i=>`${i.name} ×${i.qty}`).join(', '),masuk:cashReceived,keluar:0,order:1,source:'transaction',sourceId:String(t.id),sourceOwner:String(t.cashierUid || t.createdByUid || '')});
             });
             const isAccountExpense = x => {
                 const inferredType = x.cashAccountType || (String(x.createdByUid||'') === String(currentUser?.uid||'') ? (isKasirClient()?'kasir':'admin') : 'kasir');
                 const inferredUid = x.cashAccountUid || x.createdByUid || '';
                 return inferredType === account.type && String(inferredUid) === String(account.type==='admin'?adminUid:account.uid);
             };
-            (db.purchases||[]).filter(x=>recordBelongsToCurrentUser(x,'purchase') && x.date>=from && x.date<=to && isAccountExpense(x)).forEach(x=>rows.push({date:x.date,cashierName:x.createdByName||'—',type:'Pembelian bahan',note:x.bahanName||'Pembelian',masuk:0,keluar:Number(x.total)||0,order:2}));
-            (db.expenses||[]).filter(x=>recordBelongsToCurrentUser(x,'expense') && x.date>=from && x.date<=to && isAccountExpense(x)).forEach(x=>rows.push({date:x.date,cashierName:x.createdByName||'—',type:'Pengeluaran',note:`${x.cat||'Operasional'}${x.note?' — '+x.note:''}`,masuk:0,keluar:Number(x.amount)||0,order:3}));
+            (db.purchases||[]).filter(x=>recordBelongsToCurrentUser(x,'purchase') && x.date>=from && x.date<=to && isAccountExpense(x)).forEach(x=>rows.push({date:x.date,cashierName:x.createdByName||'—',type:'Pembelian bahan',note:x.bahanName||'Pembelian',masuk:0,keluar:Number(x.total)||0,order:2,source:'purchase',sourceId:String(x.id),sourceOwner:String(x.createdByUid || x.cashierUid || '')}));
+            (db.expenses||[]).filter(x=>recordBelongsToCurrentUser(x,'expense') && x.date>=from && x.date<=to && isAccountExpense(x)).forEach(x=>rows.push({date:x.date,cashierName:x.createdByName||'—',type:'Pengeluaran',note:`${x.cat||'Operasional'}${x.note?' — '+x.note:''}`,masuk:0,keluar:Number(x.amount)||0,order:3,source:'expense',sourceId:String(x.id),sourceOwner:String(x.createdByUid || x.cashierUid || '')}));
             rows.sort((a,b)=>a.date.localeCompare(b.date)||a.order-b.order||a.type.localeCompare(b.type));
             const periodIn=rows.reduce((a,x)=>a+x.masuk,0), periodOut=rows.reduce((a,x)=>a+x.keluar,0);
             if (el('cashTotalIn')) el('cashTotalIn').textContent=rupiah(periodIn);
@@ -6295,7 +6399,7 @@ let pendingPurchaseBahanId = null;
             if (el('cashTotalOut')) el('cashTotalOut').textContent=rupiah(periodOut);
             if (el('cashTotalOutDetails')) el('cashTotalOutDetails').textContent='Uang keluar pada akun kas yang dipilih';
             if (el('cashFlowSummary')) el('cashFlowSummary').innerHTML = isAdminClient() ? `<div class="card metric"><div><small>Kas Admin</small><strong>${rupiah(adminBalance)}</strong></div></div><div class="card metric"><div><small>Kas Seluruh Kasir</small><strong>${rupiah(allCashierBalance)}</strong></div></div><div class="card metric"><div><small>Total Kas Warung</small><strong>${rupiah(combined)}</strong></div></div>` : `<div class="card metric"><div><small>Saldo Kas Saya</small><strong>${rupiah(ownCashierBalance)}</strong></div></div>`;
-            if (el('cashFlowTable')) el('cashFlowTable').innerHTML=rows.map(x=>`<tr><td>${formatDateID(x.date)}</td><td>${x.cashierName||'—'}</td><td>${x.type}</td><td>${x.note}</td><td>${x.masuk?rupiah(x.masuk):'-'}</td><td>${x.keluar?rupiah(x.keluar):'-'}</td></tr>`).join('')||'<tr><td colspan="6"><div class="empty">Belum ada arus kas pada periode ini.</div></td></tr>';
+            const cashHead = document.querySelector('#keuangan #cashFlowTable')?.closest('table')?.querySelector('thead tr'); if(cashHead){cashHead.innerHTML='<th>Tanggal</th><th>Nama Kasir</th><th>Jenis</th><th>Keterangan</th><th>Uang Masuk</th><th>Uang Keluar</th>'+(isAdminClient()?'<th class="no-print">Aksi</th>':'');} if (el('cashFlowTable')) el('cashFlowTable').innerHTML=rows.map(x=>{const owner=String(x.sourceOwner||'').replace(/[^A-Za-z0-9_-]/g,'');let actions='';if(isAdminClient()){if(x.source==='ledger')actions=`<button class="btn" onclick="openCashLedgerEdit('${String(x.sourceId).replace(/[^A-Za-z0-9_-]/g,'')}')">✏️ Edit</button><button class="btn danger" onclick="deleteCashLedgerRecord('${String(x.sourceId).replace(/[^A-Za-z0-9_-]/g,'')}')">🗑️ Hapus</button>`;else if(x.source==='transaction')actions=`<button class="btn" onclick="openTransactionEdit('${String(x.sourceId).replace(/[^A-Za-z0-9_-]/g,'')}','${owner}')">✏️ Edit</button><button class="btn danger" onclick="deleteTransaction('${String(x.sourceId).replace(/[^A-Za-z0-9_-]/g,'')}','${owner}')">🗑️ Hapus</button>`;else if(x.source==='purchase')actions=`<button class="btn" onclick="openPurchaseModal('${String(x.sourceId).replace(/[^A-Za-z0-9_-]/g,'')}','${owner}')">✏️ Edit</button><button class="btn danger" onclick="deletePurchase('${String(x.sourceId).replace(/[^A-Za-z0-9_-]/g,'')}','${owner}')">🗑️ Hapus</button>`;else if(x.source==='expense')actions=`<button class="btn" onclick="openExpenseModal('${String(x.sourceId).replace(/[^A-Za-z0-9_-]/g,'')}','${owner}')">✏️ Edit</button><button class="btn danger" onclick="deleteExpense('${String(x.sourceId).replace(/[^A-Za-z0-9_-]/g,'')}','${owner}')">🗑️ Hapus</button>`;}return `<tr><td>${formatDateID(x.date)}</td><td>${escapeHtml(x.cashierName||'—')}</td><td>${escapeHtml(x.type)}</td><td>${escapeHtml(x.note)}</td><td>${x.masuk?rupiah(x.masuk):'-'}</td><td>${x.keluar?rupiah(x.keluar):'-'}</td>${isAdminClient()?`<td class="no-print"><div style="display:flex;gap:5px;flex-wrap:wrap">${actions}</div></td>`:''}</tr>`}).join('')||`<tr><td colspan="${isAdminClient()?7:6}"><div class="empty">Belum ada arus kas pada periode ini.</div></td></tr>`;
         }
 
         function printCashFlow() {
