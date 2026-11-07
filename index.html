@@ -5739,7 +5739,10 @@ let pendingPurchaseBahanId = null;
                 createdByName: existing?.createdByName || existing?.cashierName || currentUserName || currentUser?.displayName || 'User',
                 updatedAt: new Date().toISOString()
             };
-            const docId = existing?.__docId || (String(item.createdByUid) + '__' + String(item.id));
+            // Dokumen baru memakai ID otomatis Firestore agar tidak menimpa
+            // dokumen lama/legacy yang kebetulan memiliki nomor ID serupa.
+            const docId = existing?.__docId || colRef('expenses').doc().id;
+            item.__docId = docId;
             const saveButton = document.querySelector('#modalBody button[onclick^="saveExpense("]');
             const previous = existing ? { ...existing } : null;
             window.expenseSaving = true;
