@@ -5383,7 +5383,7 @@ let pendingPurchaseBahanId = null;
                 cost: '',
                 min: ''
             };
-            openModal(id ? 'Edit Bahan' : 'Tambah Bahan', `<div class="form-grid"><div class="field"><label>NAMA BAHAN</label><input id="bName" value="${b.name}"></div><div class="field"><label>SATUAN DASAR</label><select id="bUnit"><option value="gram" ${b.unit==='gram'?'selected':''}>gram</option><option value="ml" ${b.unit==='ml'?'selected':''}>ml</option><option value="pcs" ${b.unit==='pcs'?'selected':''}>pcs</option></select></div><div class="field"><label>ISI 1 KEMASAN</label><input id="bContent" type="number" step="${b.unit==='pcs'?'1':'0.01'}" min="${b.unit==='pcs'?'1':'0.01'}" value="${b.content||''}" placeholder="Contoh: 1000"><small style="color:var(--muted)">Contoh: 1000 gram, 1000 ml, atau 50 pcs</small></div><div class="field"><label>HARGA 1 KEMASAN</label><input id="bCost" type="number" min="0" value="${b.cost}"></div><div class="field"><label>MINIMUM STOK (${b.unit})</label><input id="bMin" type="number" step="0.01" min="0" value="${b.min}"></div></div><div style="margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:var(--muted);font-size:13px">Harga dasar otomatis: <b id="baseCostPreview">-</b> / ${b.unit}</div><button class="btn primary" style="margin-top:15px" onclick="saveBahan(${id||0})">Simpan</button>`);
+            openModal(id ? 'Edit Bahan' : 'Tambah Bahan', `<div class="form-grid"><div class="field"><label>NAMA BAHAN</label><input id="bName" value="${b.name}"></div><div class="field"><label>SATUAN DASAR</label><select id="bUnit"><option value="gram" ${b.unit==='gram'?'selected':''}>gram</option><option value="ml" ${b.unit==='ml'?'selected':''}>ml</option><option value="pcs" ${b.unit==='pcs'?'selected':''}>pcs</option></select></div><div class="field"><label>ISI 1 KEMASAN</label><input id="bContent" type="number" step="${b.unit==='pcs'?'1':'0.01'}" min="${b.unit==='pcs'?'1':'0.01'}" value="${b.content||''}" placeholder="Contoh: 1000"><small style="color:var(--muted)">Contoh: 1000 gram, 1000 ml, atau 50 pcs</small></div><div class="field"><label>HARGA 1 KEMASAN</label><input id="bCost" type="number" min="0" value="${b.cost}"></div><div class="field"><label>MINIMUM STOK (${b.unit})</label><input id="bMin" type="number" step="0.01" min="0" value="${b.min}"></div></div><div style="margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:var(--muted);font-size:13px">Harga dasar otomatis: <b id="baseCostPreview">-</b> / ${b.unit}</div><button type="button" class="btn primary" style="margin-top:15px" onclick="saveBahan(${id !== null && id !== undefined ? JSON.stringify(id) : 0})">Simpan</button>`);
             const update = () => {
                 const c = +(document.getElementById('bContent')?.value || 0),
                     p = +(document.getElementById('bCost')?.value || 0),
@@ -5404,7 +5404,9 @@ let pendingPurchaseBahanId = null;
         async function saveBahan(id) {
             // Master bahan dan perubahan stok tetap menjadi kewenangan Admin.
             if (!isAdminClient()) return toast('Hanya Admin yang dapat menambah atau mengubah master bahan. Minta Admin menambahkan bahan terlebih dahulu.');
-            const old = id ? db.bahan.find(b => b.id === id) : null;
+            const old = id !== null && id !== undefined && id !== 0 && id !== '0'
+                ? db.bahan.find(b => String(b.id) === String(id))
+                : null;
             const nameEl = document.getElementById('bName');
             const unitEl = document.getElementById('bUnit');
             const contentEl = document.getElementById('bContent');
