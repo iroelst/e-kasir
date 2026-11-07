@@ -5814,6 +5814,27 @@ let pendingPurchaseBahanId = null;
                     operation: existing ? 'update' : 'create'
                 });
 
+                // Tampilkan error sebelum proses pemulihan/render yang mungkin ikut gagal.
+                const code = error?.code ? String(error.code) : 'tanpa-kode';
+                const detail = error?.message ? String(error.message) : String(error || 'Kesalahan tidak diketahui');
+                const diagnostic = 'Gagal menyimpan pengeluaran [' + code + ']: ' + detail;
+                try { toast(diagnostic); } catch (toastError) { console.error('Toast error:', toastError); }
+                try {
+                    const body = document.getElementById('modalBody');
+                    if (body) {
+                        let panel = document.getElementById('expenseSaveError');
+                        if (!panel) {
+                            panel = document.createElement('div');
+                            panel.id = 'expenseSaveError';
+                            panel.style.cssText = 'display:block;margin:12px 0;padding:12px;border:2px solid #dc2626;border-radius:10px;background:#fff1f2;color:#991b1b;font-size:13px;line-height:1.5;white-space:normal;overflow-wrap:anywhere;';
+                            body.prepend(panel);
+                        }
+                        panel.textContent = diagnostic + ' | Proyek: ' +
+                            String(firebaseConfig?.projectId || 'tidak diketahui') +
+                            ' | Toko: ' + String(SHOP_ID || 'kosong');
+                    }
+                } catch (panelError) { console.error('Gagal menampilkan panel error:', panelError); }
+
                 if (existing && previous) {
                     const index = db.expenses.findIndex(x =>
                         String(x.__docId || '') === String(existing.__docId || ''));
@@ -5825,12 +5846,10 @@ let pendingPurchaseBahanId = null;
                 }
                 renderAll();
 
-                const code = error?.code ? ' (' + error.code + ')' : '';
                 const operation = existing ? 'memperbarui' : 'membuat';
-                toast('Firestore menolak ' + operation + ' pengeluaran' + code +
-                    '. Path: toko/' + SHOP_ID + '/expenses. UID pembuat cocok: ' +
-                    String(item.createdByUid === authUid ? 'ya' : 'tidak') +
-                    '. Periksa Rules aktif pada proyek ' + (firebaseConfig?.projectId || 'Firebase') + '.');
+                console.error('Detail operasi pengeluaran:', operation,
+                    'Path:', 'toko/' + SHOP_ID + '/expenses',
+                    'UID pembuat cocok:', item.createdByUid === authUid);
             } finally {
                 window.expenseSaving = false;
                 if (saveButton?.isConnected) {
@@ -6190,11 +6209,6 @@ let pendingPurchaseBahanId = null;
     .total { font-size: ${width === 57 ? '12px' : '14px'}; }
     .thanks { margin: 5px 0 0; }
     @media print { .no-print { display:none !important; } html, body { margin: 0; padding: 0; background:#fff; } .receipt { margin: 0; width: ${width - 6}mm; } }
-
-        /* FIX: notifikasi harus tampil di atas modal saat penyimpanan gagal */
-        .toast {
-            z-index: 100000 !important;
-        }
 </style></head><body><div class="toolbar no-print"><label for="paperWidth">Ukuran:</label><select id="paperWidth" onchange="setWidth(this.value)"><option value="57" ${width===57?'selected':''}>Thermal 57 mm</option><option value="80" ${width===80?'selected':''}>Thermal 80 mm</option></select><button onclick="window.print()">Cetak Nota</button></div>${receipt}
 <script>
     function setWidth(value) {
