@@ -3204,32 +3204,25 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             // Jangan menahan layar login sampai seluruh koleksi Firestore selesai dibaca.
             // Tampilkan cache lokal terlebih dahulu, lalu perbarui dari Firebase di latar belakang.
             // Jika ada antrean lokal, sinkronkan dahulu agar data lokal belum terkirim tidak tertimpa.
-            const hasPendingSync = navigator.onLine &&
-                localStorage.getItem('ekasir_pending_sync_' + currentUser.uid) === '1';
             if (!navigator.onLine) {
-                setCloudStatus('Offline — data lokal');
+                setCloudStatus('Offline — transaksi dan perubahan data dinonaktifkan');
             } else {
-                setCloudStatus(hasPendingSync ? 'Menyinkronkan...' : 'Memperbarui data...');
+                setCloudStatus('Memuat data dari Firestore...');
                 (async () => {
                     try {
-                        if (hasPendingSync) await syncFirebase(true);
-                        if (localStorage.getItem('ekasir_pending_sync_' + currentUser.uid) !== '1') {
-                            await loadFirebaseData();
-                            applyRoleAccess();
-                            ensureAdminUserManagement();
-                            renderAll();
-                        } else {
-                            setCloudStatus('Sinkronisasi tertunda — data lokal aman');
-                        }
+                        await loadFirebaseData();
+                        if (cloudDataReady && migrateInitialStockToJanuary2026()) await save();
+                        applyRoleAccess();
+                        ensureAdminUserManagement();
+                        renderAll();
                     } catch (backgroundError) {
-                        console.error('Pembaruan data latar belakang:', backgroundError);
-                        setCloudStatus('Data lokal — sinkronisasi tertunda');
+                        console.error('Gagal memuat data Firestore:', backgroundError);
+                        setCloudStatus('Gagal memuat Firestore — perubahan dinonaktifkan');
                     }
                 })();
             }
             applyRoleAccess();
             ensureAdminUserManagement();
-            if (migrateInitialStockToJanuary2026()) save();
             renderAll();
         }
 
@@ -3339,6 +3332,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             return [...map.values()];
         }
         async function loadFirebaseData() {
+            cloudDataReady = false;
             if (!currentUser || !firebaseReady) return;
             if (!navigator.onLine) {
                 setCloudStatus('Offline — data lokal');
@@ -3418,11 +3412,14 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                 // Hindari menulis ulang seluruh periode ke Firebase setiap kali login.
                 recalculateStockPeriods();
                 localStorage.setItem(KEY, JSON.stringify(db));
+                lastCommittedDb = JSON.parse(JSON.stringify(db));
+                cloudDataReady = true;
                 await migrateUndefinedRecipes();
                 setCloudStatus('Tersinkron', true)
             } catch (e) {
+                cloudDataReady = false;
                 console.error(e);
-                setCloudStatus('Sinkron gagal');
+                setCloudStatus('Gagal memuat Firestore');
             }
         }
         async function migrateUndefinedRecipes() {
@@ -3493,86 +3490,141 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                     if (!wanted.has(d.id)) await d.ref.delete()
             }
         }
+        function cloneDb(value) {
+            return JSON.parse(JSON.stringify(value || blankDb()));
+        }
+        function firestoreDocumentId(name, item) {
+            const rawId = name === 'recipes'
+                ? (item.menuId ?? item.menuID ?? item.id)
+                : item.id;
+            if (rawId === undefined || rawId === null || String(rawId).trim() === '' || String(rawId) === 'undefined')
+                throw new Error('ID data ' + name + ' tidak valid. Data tidak disimpan.');
+            let id = String(rawId);
+            if (['purchases', 'expenses', 'stock'].includes(name)) {
+                const owner = String(item.createdByUid || item.cashierUid || '');
+                if (owner) id = owner + '__' + id;
+            }
+            return id;
+        }
+        async function writeCollectionDiff(name, rows, previousRows, ownerOnly = false) {
+            const ref = colRef(name);
+            const current = Array.isArray(rows) ? rows : [];
+            const previous = Array.isArray(previousRows) ? previousRows : [];
+            const currentIds = new Set();
+            for (const row of current) {
+                if (ownerOnly && !(name === 'cashLedger'
+                    ? (String(row.ownerUid || row.cashAccountUid || '') === String(currentUser?.uid || ''))
+                    : recordBelongsToCurrentUser(row, (name === 'purchases' || name === 'stock') ? 'purchase' : 'expense'))) continue;
+                const id = firestoreDocumentId(name, row);
+                currentIds.add(id);
+                const payload = { ...row };
+                delete payload.__docId;
+                await ref.doc(id).set(payload, { merge: true });
+            }
+            // Delete only documents removed from the last server-confirmed snapshot.
+            // Never perform a collection-wide delete based on a partial Kasir view.
+            for (const row of previous) {
+                if (ownerOnly && !(name === 'cashLedger'
+                    ? (String(row.ownerUid || row.cashAccountUid || '') === String(currentUser?.uid || ''))
+                    : recordBelongsToCurrentUser(row, (name === 'purchases' || name === 'stock') ? 'purchase' : 'expense'))) continue;
+                let id;
+                try { id = firestoreDocumentId(name, row); } catch (_) { continue; }
+                if (!currentIds.has(id)) await ref.doc(id).delete();
+            }
+        }
+        async function persistDbDirect(candidate, baseline) {
+            requireOnlineCheckout();
+            const admin = isAdminClient();
+            if (admin) {
+                await Promise.all([
+                    writeCollectionDiff('menus', candidate.menus, baseline.menus),
+                    writeCollectionDiff('bahan', candidate.bahan, baseline.bahan),
+                    writeCollectionDiff('recipes', candidate.recipes, baseline.recipes),
+                    writeCollectionDiff('purchases', candidate.purchases, baseline.purchases),
+                    writeCollectionDiff('expenses', candidate.expenses, baseline.expenses),
+                    writeCollectionDiff('cashLedger', candidate.cashLedger || [], baseline.cashLedger || []),
+                    writeCollectionDiff('stock', candidate.stockMoves, baseline.stockMoves),
+                    writeCollectionDiff('stockPeriods', Object.entries(candidate.stockPeriods || {}).map(([id, v]) => ({ id, ...v })), Object.entries(baseline.stockPeriods || {}).map(([id, v]) => ({ id, ...v })))
+                ]);
+                await fbFs.doc('toko/' + SHOP_ID + '/settings/profile').set(candidate.settings || {}, { merge: true });
+            } else if (isKasirClient()) {
+                await Promise.all([
+                    writeCollectionDiff('purchases', candidate.purchases, baseline.purchases, true),
+                    writeCollectionDiff('stock', candidate.stockMoves, baseline.stockMoves, true),
+                    writeCollectionDiff('expenses', candidate.expenses, baseline.expenses, true),
+                    writeCollectionDiff('cashLedger', candidate.cashLedger || [], baseline.cashLedger || [], true)
+                ]);
+            } else {
+                throw new Error('Peran akun tidak diizinkan menyimpan data.');
+            }
+        }
         async function syncFirebase(force = false) {
-            // Jangan mengirim data memakai identitas sesi lokal yang belum diverifikasi Firebase.
-            if (offlineLocalSession || !currentUser || !firebaseReady || !fbAuth?.currentUser || fbAuth.currentUser.uid !== currentUser.uid) return;
-            if (!navigator.onLine) {
-                setCloudStatus('Offline — menunggu sinkronisasi');
-                return;
-            }
-            if (force) setCloudStatus('Menyinkronkan...');
-            try {
-                if (isAdminClient()) {
-                    // Sinkronisasi rutin bersifat merge-only; tidak menghapus dokumen cloud
-                    // berdasarkan salinan lokal yang mungkin belum lengkap.
-                    await Promise.all([writeArray('menus', db.menus, false), writeArray('bahan', db.bahan, false), writeArray('recipes', db.recipes, false), writeArray('transactions', db.transactions, false), writeArray('purchases', db.purchases, false), writeArray('expenses', db.expenses, false), writeArray('cashLedger', db.cashLedger || [], false), writeArray('stock', db.stockMoves, false), writeArray('stockPeriods', Object.entries(db.stockPeriods).map(([id, v]) => ({
-                        id,
-                        ...v
-                    })), false)]);
-                    await fbFs.doc('toko/' + SHOP_ID + '/settings/profile').set(db.settings, {
-                        merge: true
-                    })
-                } else if (isKasirClient()) {
-                    await Promise.all([writeArray('transactions', db.transactions, false), writeArray('purchases', db.purchases, false), writeArray('expenses', db.expenses, false), writeArray('cashLedger', db.cashLedger || [], false)])
-                }
-                localStorage.setItem(KEY, JSON.stringify(db));
-                try { localStorage.removeItem('ekasir_pending_sync_' + currentUser.uid); } catch (_) {}
-                setCloudStatus('Tersinkron', true)
-            } catch (e) {
-                console.error(e);
-                setCloudStatus(navigator.onLine ? 'Sinkron gagal' : 'Offline — menunggu sinkronisasi');
-                if (navigator.onLine) toast('Sinkronisasi Firebase gagal: ' + (e.message || ''));
-            }
+            if (offlineLocalSession || !currentUser || !firebaseReady || !fbAuth?.currentUser || fbAuth.currentUser.uid !== currentUser.uid)
+                throw new Error('Sesi Firebase tidak valid. Login ulang.');
+            if (!navigator.onLine) throw new Error('Offline. Perubahan data ditolak.');
+            const candidate = cloneDb(db);
+            const baseline = cloneDb(lastCommittedDb || db);
+            if (force) setCloudStatus('Menyimpan ke Firestore...');
+            await persistDbDirect(candidate, baseline);
+            lastCommittedDb = cloneDb(candidate);
+            localStorage.setItem(KEY, JSON.stringify(candidate));
+            try { localStorage.removeItem('ekasir_pending_sync_' + currentUser.uid); } catch (_) {}
+            setCloudStatus('Semua perubahan tersimpan di Firestore', true);
+            return true;
         }
-        let syncTimer = null;
-
         function queueCloudSync() {
-            if (!currentUser) return;
-            if (!navigator.onLine) {
-                setCloudStatus('Offline — menunggu sinkronisasi');
-                return;
-            }
-            clearTimeout(syncTimer);
-            syncTimer = setTimeout(() => syncFirebase(false), 500)
+            // Retained only for legacy callers. There is no deferred/offline queue.
+            return syncFirebase(true);
         }
-
         function save() {
             normalizeDb();
-            localStorage.setItem(KEY, JSON.stringify(db));
-            if (currentUser?.uid) {
-                try { localStorage.setItem('ekasir_pending_sync_' + currentUser.uid, '1'); } catch (_) {}
+            if (!navigator.onLine || offlineLocalSession || !cloudDataReady || !currentUser?.uid || !firebaseReady ||
+                !fbAuth?.currentUser || fbAuth.currentUser.uid !== currentUser.uid) {
+                const err = new Error('Tidak dapat menyimpan: koneksi internet atau sesi Firebase tidak tersedia.');
+                toast(err.message);
+                return Promise.reject(err);
             }
-            queueCloudSync()
+            const candidate = cloneDb(db);
+            const task = directSaveQueue.catch(() => {}).then(async () => {
+                const baseline = cloneDb(lastCommittedDb || db);
+                try {
+                    await persistDbDirect(candidate, baseline);
+                    lastCommittedDb = cloneDb(candidate);
+                    localStorage.setItem(KEY, JSON.stringify(candidate));
+                    setCloudStatus('Semua perubahan tersimpan di Firestore', true);
+                    return true;
+                } catch (e) {
+                    if (lastCommittedDb) {
+                        db = cloneDb(lastCommittedDb);
+                        normalizeDb();
+                        renderAll();
+                    }
+                    setCloudStatus('Gagal menyimpan ke Firestore');
+                    console.error('Penyimpanan langsung Firestore gagal:', e);
+                    toast('Perubahan ditolak. Firestore gagal menyimpan: ' + (e.message || 'Kesalahan jaringan/rules.'));
+                    throw e;
+                }
+            });
+            directSaveQueue = task;
+            return task;
         }
 
-        // Saat offline, transaksi tetap tersimpan di localStorage. Ketika internet
-        // kembali, kirim data lokal terlebih dahulu baru muat ulang data cloud.
+        // Semua perubahan data wajib menunggu commit Firestore; tidak ada antrean offline.
         window.addEventListener('offline', () => {
-            setCloudStatus('Offline — data tersimpan di perangkat');
+            setCloudStatus('Offline — perubahan data ditolak');
         });
         window.addEventListener('online', async () => {
-            if (!firebaseReady) return;
-            // Jika sedang dalam sesi lokal, lanjutkan sinkronisasi hanya setelah Firebase
-            // memulihkan user asli; jika belum ada, jangan kirim data dengan sesi palsu.
-            if (offlineLocalSession) {
-                const authenticatedUser = fbAuth?.currentUser;
-                if (authenticatedUser) {
-                    await finishFirebaseLogin(authenticatedUser);
-                } else {
-                    setCloudStatus('Internet kembali — login diperlukan untuk sinkronisasi');
-                    showAuthMessage('Data lokal tetap aman. Login kembali saat internet aktif untuk menyinkronkan data.');
-                    return;
-                }
+            if (!firebaseReady || !fbAuth?.currentUser) {
+                setCloudStatus('Internet kembali — login Firebase diperlukan.');
+                return;
             }
-            if (!currentUser) return;
-            setCloudStatus('Internet kembali — menyinkronkan...');
-            await syncFirebase(true);
-            if (localStorage.getItem('ekasir_pending_sync_' + currentUser.uid) !== '1') {
+            try {
                 await loadFirebaseData();
-            } else {
-                setCloudStatus('Sinkronisasi tertunda — data lokal aman');
+                if (cloudDataReady) renderAll();
+            } catch (e) {
+                cloudDataReady = false;
+                setCloudStatus('Gagal memuat Firestore — perubahan dinonaktifkan');
             }
-            renderAll();
         });
 
         function renderUserChip() {
@@ -3584,7 +3636,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             el.innerHTML = currentUser ? '<div class="user-avatar">👤</div><div class="user-chip-text"><div class="user-name-label">' + escapeHtml(name) + '</div><div class="user-role-label">' + roleLabel + '</div></div>' : '';
         }
         function showToastOfflineNotice() {
-            try { toast('Mode offline: data tersimpan di HP. Login online diperlukan untuk sinkronisasi.'); } catch (_) {}
+            try { toast('Mode offline: perubahan data dan transaksi ditolak. Hubungkan internet untuk melanjutkan.'); } catch (_) {}
         }
         async function logout() {
             offlineLocalSession = false;
@@ -4276,10 +4328,54 @@ let pendingPurchaseBahanId = null;
             }
         }
 
-        function saveCheckoutRecord(status, paidAmount, change = 0) {
+        // Transaksi penjualan hanya dianggap berhasil setelah commit Firestore.
+        let checkoutSaving = false;
+        function requireOnlineCheckout() {
+            if (!navigator.onLine) throw new Error('Offline. Transaksi ditolak; hubungkan internet.');
+            if (!cloudDataReady || offlineLocalSession || !firebaseReady || !currentUser?.uid ||
+                !fbAuth?.currentUser || fbAuth.currentUser.uid !== currentUser.uid || !SHOP_ID) {
+                throw new Error('Sesi Firebase tidak siap. Login ulang saat online.');
+            }
+        }
+        function transactionDocRef(record) {
+            const owner = String(record.cashierUid || record.createdByUid || '');
+            return colRef('transactions').doc(owner ? owner + '__' + String(record.id) : String(record.id));
+        }
+        async function commitCheckoutRecord(record, existing = false) {
+            requireOnlineCheckout();
+            const ref = existing && record.__docId
+                ? colRef('transactions').doc(String(record.__docId))
+                : transactionDocRef(record);
+            // Firestore transaction tidak melakukan antrean tulis offline dan menunggu server.
+            await fbFs.runTransaction(async tx => {
+                const snapshot = await tx.get(ref);
+                if (existing && !snapshot.exists) throw new Error('Transaksi tidak ditemukan di Firestore. Muat ulang data.');
+                if (!existing && snapshot.exists) throw new Error('Nomor transaksi sudah ada di Firestore. Ulangi transaksi.');
+                if (existing) {
+                    const remote = snapshot.data() || {};
+                    if (String(remote.cashierUid || remote.createdByUid || '') !== String(record.cashierUid || record.createdByUid || ''))
+                        throw new Error('Pemilik transaksi tidak cocok.');
+                }
+                const { __docId, ...payload } = record;
+                tx.set(ref, payload, { merge: true });
+            });
+            // Perbarui cache hanya setelah server mengonfirmasi commit.
+            const idx = db.transactions.findIndex(x => String(x.id) === String(record.id) &&
+                String(x.cashierUid || x.createdByUid || '') === String(record.cashierUid || record.createdByUid || ''));
+            if (idx >= 0) db.transactions[idx] = record;
+            else db.transactions.push(record);
+            sharedStockTransactions = [...(sharedStockTransactions || []).filter(x =>
+                !(String(x.id) === String(record.id) && String(x.cashierUid || x.createdByUid || '') === String(record.cashierUid || record.createdByUid || ''))), record];
+            normalizeDb();
+            localStorage.setItem(KEY, JSON.stringify(db));
+            lastCommittedDb = cloneDb(db);
+            setCloudStatus('Transaksi tersimpan di Firestore', true);
+            return record;
+        }
+        async function saveCheckoutRecord(status, paidAmount, change = 0) {
             const d = new Date();
             const record = {
-                id: db.nextId++,
+                id: d.getTime() * 100 + Math.floor(Math.random() * 100),
                 date: pendingCheckout.date || today(),
                 time: d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
                 items: pendingCheckout.items.map(i => ({ ...i })),
@@ -4290,14 +4386,11 @@ let pendingPurchaseBahanId = null;
                 change: Math.max(0, +change || 0),
                 payments: (+paidAmount || 0) > 0 ? [{ method: pendingCheckout.pay || 'Tunai', amount: Math.max(0, +paidAmount || 0), change: Math.max(0, +change || 0), date: pendingCheckout.date || today(), time: d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) }] : [],
                 paymentVersion: 2,
-                status: status,
+                status,
                 cashierUid: currentUser?.uid || '',
                 cashierName: currentUserName || currentUser?.displayName || (currentUser?.email ? currentUser.email.split('@')[0] : '') || (isAdminClient() ? 'Admin' : 'Kasir')
             };
-            db.transactions.push(record);
-            sharedStockTransactions = [...(sharedStockTransactions || []).filter(x => !(String(x.id) === String(record.id) && String(x.cashierUid || x.createdByUid || '') === String(record.cashierUid || record.createdByUid || ''))), record];
-            save();
-            return record;
+            return commitCheckoutRecord(record);
         }
 
         function getNetPaidAmount(transaction) {
@@ -4321,7 +4414,11 @@ let pendingPurchaseBahanId = null;
             return method.includes('tunai') ? getNetPaidAmount(transaction) : 0;
         }
 
-        function confirmCheckoutPayment() {
+        async function confirmCheckoutPayment() {
+            if (checkoutSaving) return;
+            checkoutSaving = true;
+            try {
+                requireOnlineCheckout();
             if (!pendingCheckout) return;
             const entered = Number(document.getElementById('paymentAmount')?.value || 0);
             if (!Number.isFinite(entered) || entered <= 0) return toast('Masukkan nominal pembayaran yang valid.');
@@ -4349,35 +4446,47 @@ let pendingPurchaseBahanId = null;
                 const paymentHistory = Array.isArray(t.payments) ? t.payments.slice() :
                     (previous > 0 ? [{ method: t.pay || 'Tunai', amount: previous, change: previousChange, date: t.date || today(), time: t.time || '' }] : []);
                 if (applied > 0) paymentHistory.push({ method: pendingCheckout.pay || t.pay || 'Tunai', amount: applied, change, date: today(), time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) });
-                t.payments = paymentHistory;
-                t.paidAmount = previous + applied;
-                t.change = previousChange + change;
+                const updated = { ...t };
+                updated.payments = paymentHistory;
+                updated.paidAmount = previous + applied;
+                updated.change = previousChange + change;
                 const methods = [...new Set(paymentHistory.map(x => String(x.method || 'Tunai')))];
-                t.pay = methods.length > 1 ? 'Campuran' : (methods[0] || t.pay || 'Tunai');
-                t.paymentVersion = 2;
-                t.status = t.paidAmount >= total ? 'lunas' : t.paidAmount > 0 ? 'sebagian' : 'belum bayar';
-                save();
-                const done = t.status === 'lunas';
+                updated.pay = methods.length > 1 ? 'Campuran' : (methods[0] || t.pay || 'Tunai');
+                updated.paymentVersion = 2;
+                updated.status = updated.paidAmount >= total ? 'lunas' : updated.paidAmount > 0 ? 'sebagian' : 'belum bayar';
+                await commitCheckoutRecord(updated, true);
+                const done = updated.status === 'lunas';
                 closeModal();
                 pendingCheckout = null;
                 cart = [];
                 renderAll();
-                if (done) openPaymentSuccess(t);
+                if (done) openPaymentSuccess(updated);
                 else toast('Pembayaran tersimpan, masih ada sisa tagihan');
                 return;
             }
 
             const status = applied >= total ? 'lunas' : applied > 0 ? 'sebagian' : 'belum bayar';
-            const record = saveCheckoutRecord(status, applied, change);
+            const record = await saveCheckoutRecord(status, applied, change);
             closeModal();
             pendingCheckout = null;
             cart = [];
             renderAll();
             if (status === 'lunas') openPaymentSuccess(record);
             else toast(`Pembayaran tersimpan. Sisa tagihan ${rupiah(total - applied)}`);
+            } catch (e) {
+                console.error('Gagal menyimpan transaksi ke Firestore:', e);
+                setCloudStatus('Transaksi gagal disimpan');
+                toast('Transaksi ditolak: ' + (e.message || 'Gagal menghubungi Firestore'));
+            } finally {
+                checkoutSaving = false;
+            }
         }
 
-        function saveUnpaidCheckout() {
+        async function saveUnpaidCheckout() {
+            if (checkoutSaving) return;
+            checkoutSaving = true;
+            try {
+                requireOnlineCheckout();
             if (!pendingCheckout) return;
             const entered = Number(document.getElementById('paymentAmount')?.value || 0);
             if (!Number.isFinite(entered) || entered < 0) return toast('Nominal pembayaran tidak valid.');
@@ -4397,30 +4506,38 @@ let pendingPurchaseBahanId = null;
                 const paymentHistory = Array.isArray(t.payments) ? t.payments.slice() :
                     (previous > 0 ? [{ method: t.pay || 'Tunai', amount: previous, change: previousChange, date: t.date || today(), time: t.time || '' }] : []);
                 if (applied > 0) paymentHistory.push({ method: pendingCheckout.pay || t.pay || 'Tunai', amount: applied, change, date: today(), time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) });
-                t.payments = paymentHistory;
-                t.paidAmount = previous + applied;
-                t.change = previousChange + change;
+                const updated = { ...t };
+                updated.payments = paymentHistory;
+                updated.paidAmount = previous + applied;
+                updated.change = previousChange + change;
                 const methods = [...new Set(paymentHistory.map(x => String(x.method || 'Tunai')))];
-                t.pay = methods.length > 1 ? 'Campuran' : (methods[0] || t.pay || 'Tunai');
-                t.paymentVersion = 2;
-                t.status = t.paidAmount >= total ? 'lunas' : t.paidAmount > 0 ? 'sebagian' : 'belum bayar';
-                save();
+                updated.pay = methods.length > 1 ? 'Campuran' : (methods[0] || t.pay || 'Tunai');
+                updated.paymentVersion = 2;
+                updated.status = updated.paidAmount >= total ? 'lunas' : updated.paidAmount > 0 ? 'sebagian' : 'belum bayar';
+                await commitCheckoutRecord(updated, true);
                 closeModal();
                 pendingCheckout = null;
                 renderAll();
-                toast(t.status === 'lunas' ? 'Pembayaran lunas' : 'Pembayaran tersimpan, masih ada sisa tagihan');
-                if (t.status === 'lunas') openPaymentSuccess(t);
+                toast(updated.status === 'lunas' ? 'Pembayaran lunas' : 'Pembayaran tersimpan, masih ada sisa tagihan');
+                if (updated.status === 'lunas') openPaymentSuccess(updated);
                 return;
             }
 
             const status = applied >= total && total > 0 ? 'lunas' : applied > 0 ? 'sebagian' : 'belum bayar';
-            const record = saveCheckoutRecord(status, applied, change);
+            const record = await saveCheckoutRecord(status, applied, change);
             closeModal();
             pendingCheckout = null;
             cart = [];
             renderAll();
             if (status === 'lunas') openPaymentSuccess(record);
             else toast(status === 'sebagian' ? `Tersimpan. Sisa ${rupiah(total - applied)}` : 'Transaksi tersimpan sebagai belum bayar');
+            } catch (e) {
+                console.error('Gagal menyimpan transaksi ke Firestore:', e);
+                setCloudStatus('Transaksi gagal disimpan');
+                toast('Transaksi ditolak: ' + (e.message || 'Gagal menghubungi Firestore'));
+            } finally {
+                checkoutSaving = false;
+            }
         }
 
         function openSettlePayment(id, ownerUid = '') {
@@ -4439,7 +4556,7 @@ let pendingPurchaseBahanId = null;
             menuTable.innerHTML = a.map(m => `<tr><td><b>${m.emoji||'☕'} ${m.name}</b></td><td>${m.cat}</td><td>${rupiah(m.price)}</td><td>${rupiah(m.hpp)}</td><td><b>${rupiah(m.price-m.hpp)}</b></td><td><span class="badge ${m.active !== false?'ok':''}">${m.active !== false?'Aktif':'Nonaktif'}</span></td><td><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn" title="Edit menu" onclick="editMenu(${m.id})">✏️ Edit</button><button class="btn" title="${m.active !== false?'Nonaktifkan':'Aktifkan'} menu" onclick="toggleMenuActive(${m.id})">${m.active !== false?'Nonaktifkan':'Aktifkan'}</button></div></td></tr>`).join('') || '<tr><td colspan="7"><div class="empty">Belum ada menu.</div></td></tr>'
         }
 
-        function toggleMenuActive(id) {
+        async function toggleMenuActive(id) {
             if (!isAdminClient()) return toast('Hanya Admin yang dapat mengubah status menu.');
             const m = db.menus.find(x => x.id === id);
             if (!m) return toast('Menu tidak ditemukan.');
@@ -4449,7 +4566,7 @@ let pendingPurchaseBahanId = null;
                 : `Aktifkan kembali menu "${m.name}" agar tampil di Kasir?`;
             if (!confirm(message)) return;
             m.active = !willDeactivate;
-            save();
+            await save();
             renderAll();
             toast(m.active ? `Menu "${m.name}" diaktifkan.` : `Menu "${m.name}" dinonaktifkan. Data transaksi lama tetap tersimpan.`);
         }
@@ -4579,11 +4696,11 @@ let pendingPurchaseBahanId = null;
             document.getElementById('stockTo').value = r.to;
         }
 
-        function changeStockRange() {
+        async function changeStockRange() {
             const r = getRange();
             if (r.from > r.to) return toast('Tanggal awal tidak boleh melewati tanggal akhir');
             ensurePeriod(rangeKey(r.from, r.to), r.from, r.to);
-            save();
+            await save();
             renderAll()
         }
 
@@ -4627,7 +4744,7 @@ let pendingPurchaseBahanId = null;
             openModal('Atur Bulan Mulai Penggunaan Stok', `<p style="margin-top:0;color:var(--muted);font-size:13px">Tentukan bulan pertama usaha mulai menggunakan aplikasi. Pada bulan ini Anda mengisi stok fisik awal secara manual. Bulan-bulan setelahnya mengikuti stok akhir bulan sebelumnya.</p><div class="field"><label>BULAN MULAI</label><input id="stockStartMonthInput" type="month" value="${defaultMonth}" required></div><button class="btn primary" style="margin-top:15px" onclick="saveStockStartMonth()">Simpan Bulan Mulai</button>`);
         }
 
-        function saveStockStartMonth() {
+        async function saveStockStartMonth() {
             if (!isAdminClient()) return toast('Hanya Admin yang dapat mengatur bulan mulai stok.');
             const month = document.getElementById('stockStartMonthInput')?.value || '';
             if (!/^\d{4}-\d{2}$/.test(month)) return toast('Pilih bulan mulai yang valid.');
@@ -4639,7 +4756,7 @@ let pendingPurchaseBahanId = null;
             const to = `${month}-${String(new Date(y,m,0).getDate()).padStart(2,'0')}`;
             document.getElementById('stockFrom').value = p.from;
             document.getElementById('stockTo').value = to;
-            save();
+            await save();
             closeModal();
             renderAll();
             openInitialOpeningModal();
@@ -4664,7 +4781,7 @@ let pendingPurchaseBahanId = null;
             if (b && e && v) v.textContent = rupiah(stockValue(b, +e.value || 0));
         }
 
-        function saveInitialOpening() {
+        async function saveInitialOpening() {
             if (!isAdminClient()) return toast('Hanya Admin yang dapat mengedit stok awal pertama.');
             const month = getStockStartMonth();
             if (!month) return toast('Tentukan bulan mulai penggunaan stok terlebih dahulu.');
@@ -4692,7 +4809,7 @@ let pendingPurchaseBahanId = null;
                 period.ending = {};
             });
             recalculateStockPeriods();
-            save();
+            await save();
             closeModal();
             renderAll();
             toast(`Stok awal ${month} diperbarui. Saldo bulan berikutnya dihitung ulang.`);
@@ -4705,7 +4822,7 @@ let pendingPurchaseBahanId = null;
             if (b && e && v) v.textContent = rupiah(stockValue(b, +e.value || 0))
         }
 
-        function saveOpening() {
+        async function saveOpening() {
             const r = getRange(),
                 key = rangeKey(r.from, r.to),
                 p = ensurePeriod(key, r.from, r.to),
@@ -4724,7 +4841,7 @@ let pendingPurchaseBahanId = null;
             if (!getStockStartMonth()) db.settings.stockStartMonth = String(r.from).slice(0, 7);
             p.openingDate = d;
             Object.assign(p.opening, openingValues);
-            save();
+            await save();
             closeModal();
             renderAll();
             toast('Stok awal tersimpan')
@@ -5189,24 +5306,13 @@ let pendingPurchaseBahanId = null;
             if (idx >= 0) db.recipes[idx] = rec;
             else db.recipes.push(rec);
 
-            // Simpan lokal terlebih dahulu agar perubahan tidak hilang jika jaringan putus.
-            save();
-            closeModal();
-            renderAll();
-
-            // Jangan menyatakan berhasil di cloud sebelum sinkronisasi selesai.
-            if (currentUser?.uid && firebaseReady && navigator.onLine && !offlineLocalSession) {
-                clearTimeout(syncTimer);
-                await syncFirebase(true);
-                const stillPending = localStorage.getItem('ekasir_pending_sync_' + currentUser.uid) === '1';
+            try {
+                await save();
+                closeModal();
                 renderAll();
-                if (stillPending) {
-                    toast('Menu tersimpan di perangkat, tetapi sinkronisasi Firebase belum berhasil. Periksa status cloud.');
-                } else {
-                    toast('Menu & resep berhasil tersimpan di Firebase.');
-                }
-            } else {
-                toast('Menu tersimpan di perangkat. Sinkronisasi Firebase menunggu koneksi/login online.');
+                toast('Menu dan resep berhasil tersimpan di Firestore.');
+            } catch (e) {
+                // save() restores the last server-confirmed state on failure.
             }
         }
 
@@ -5236,7 +5342,7 @@ let pendingPurchaseBahanId = null;
             openBahanModal(id)
         }
 
-        function saveBahan(id) {
+        async function saveBahan(id) {
             const old = id ? db.bahan.find(b => b.id === id) : null;
             const nameEl = document.getElementById('bName');
             const unitEl = document.getElementById('bUnit');
@@ -5263,7 +5369,7 @@ let pendingPurchaseBahanId = null;
             };
             if (id) db.bahan = db.bahan.map(b => b.id === id ? x : b);
             else db.bahan.push(x);
-            save();
+            await save();
             const goBack = returnToPurchase;
             if (goBack && !id) pendingPurchaseBahanId = x.id;
             returnToPurchase = false;
@@ -5393,7 +5499,7 @@ let pendingPurchaseBahanId = null;
             else db.stockMoves.push({ ...purchase });
         }
 
-        function savePurchase(editId = 0, ownerUid = '') {
+        async function savePurchase(editId = 0, ownerUid = '') {
             const b = db.bahan.find(x => x.id === +(document.getElementById('pBahan')?.value || 0));
             const date = document.getElementById('pDate')?.value || '';
             const n = +(document.getElementById('pPackages')?.value || 0);
@@ -5414,7 +5520,7 @@ let pendingPurchaseBahanId = null;
             sharedStockPurchases = [...(sharedStockPurchases || []).filter(x => !(String(x.id) === String(purchase.id) && String(x.createdByUid || x.cashierUid || '') === String(purchase.createdByUid || purchase.cashierUid || ''))), purchase];
             syncPurchaseToStockMove(purchase);
             recalculateStockPeriods();
-            save();
+            await save();
             closeModal();
             renderAll();
             toast(editId ? 'Pembelian berhasil diperbarui dan stok disesuaikan.' : `Pembelian tersimpan · stok bertambah ${formatQty(purchase.qty)} ${b.unit}`);
@@ -5494,7 +5600,7 @@ let pendingPurchaseBahanId = null;
                 sharedStockPurchases = (sharedStockPurchases || []).filter(x => !(String(x.id) === String(id) && String(x.createdByUid || x.cashierUid || '') === String(p.createdByUid || p.cashierUid || '')));
                 db.stockMoves = (db.stockMoves || []).filter(x => !(String(x.id) === String(id) && String(x.createdByUid || x.cashierUid || '') === String(p.createdByUid || p.cashierUid || '') && x.type === 'purchase'));
                 recalculateStockPeriods();
-                save();
+                await save();
                 renderAll();
                 toast('Pembelian dihapus dari perangkat dan Firebase. Stok telah dihitung ulang.');
             } catch (e) {
@@ -5511,7 +5617,7 @@ let pendingPurchaseBahanId = null;
             openModal(editing ? 'Edit Pengeluaran' : 'Catat Pengeluaran', `<div class="form-grid"><div class="field"><label>TANGGAL</label><input id="eDate" type="date" value="${editing?.date || today()}"></div><div class="field"><label>KATEGORI</label><input id="eCat" value="${escapeHtml(editing?.cat || 'Operasional')}"></div><div class="field"><label>JUMLAH</label><input id="eAmount" type="number" min="0" value="${editing?.amount ?? ''}"></div><div class="field full"><label>KETERANGAN</label><input id="eNote" value="${escapeHtml(editing?.note || '')}" placeholder="Contoh: beli gas"></div></div><button class="btn primary" style="margin-top:15px" onclick="saveExpense(${editId || 0},'${String(editing?.createdByUid || editing?.cashierUid || ownerUid || '').replace(/[^A-Za-z0-9_-]/g, '')}')">${editing ? 'Simpan Perubahan' : 'Simpan'}</button>`)
         }
 
-        function saveExpense(editId = 0, ownerUid = '') {
+        async function saveExpense(editId = 0, ownerUid = '') {
             if (!isAdminClient() && !isKasirClient()) return toast('Akses mencatat pengeluaran tidak diizinkan.');
             const date = document.getElementById('eDate')?.value || today();
             const cat = (document.getElementById('eCat')?.value || '').trim();
@@ -5528,20 +5634,20 @@ let pendingPurchaseBahanId = null;
                 createdByName: existing?.createdByName || existing?.cashierName || currentUserName || currentUser?.displayName || 'User' };
             if (editId) db.expenses = db.expenses.map(x => String(x.id) === String(editId) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid)) ? item : x);
             else db.expenses.push(item);
-            save();
+            await save();
             closeModal();
             renderAll();
             toast(editId ? 'Pengeluaran berhasil diperbarui.' : 'Pengeluaran tersimpan');
         }
 
-        function deleteExpense(id, ownerUid = '') {
+        async function deleteExpense(id, ownerUid = '') {
             if (!isAdminClient() && !isKasirClient()) return toast('Akses menghapus pengeluaran tidak diizinkan.');
             const e = db.expenses.find(x => String(x.id) === String(id) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid)));
             if (!e) return toast('Data pengeluaran tidak ditemukan.');
             if (!recordBelongsToCurrentUser(e, 'expense')) return toast('Anda hanya dapat menghapus pengeluaran milik akun sendiri.');
             if (confirm(`Hapus pengeluaran ${rupiah(e.amount)} — ${e.note || e.cat}? Data ini juga akan hilang dari laporan terkait.`)) {
                 db.expenses = db.expenses.filter(x => !(String(x.id) === String(id) && String(x.createdByUid || x.cashierUid || '') === String(e.createdByUid || e.cashierUid || '')));
-                save();
+                await save();
                 renderAll();
                 toast('Pengeluaran dihapus.');
             }
@@ -5658,12 +5764,12 @@ let pendingPurchaseBahanId = null;
         function restore(file) {
             if (!file) return;
             let r = new FileReader();
-            r.onload = () => {
+            r.onload = async () => {
                 try {
                     let x = JSON.parse(r.result);
                     if (!x.menus || !x.transactions) throw 0;
                     db = x;
-                    save();
+                    await save();
                     renderAll();
                     toast('Data berhasil dipulihkan')
                 } catch (e) {
@@ -6039,7 +6145,7 @@ let pendingPurchaseBahanId = null;
             else db.cashLedger.push(row);
         }
 
-        function saveCashOpening() {
+        async function saveCashOpening() {
             if (!isAdminClient() && !isKasirClient()) return toast('Akses pengaturan saldo awal tidak diizinkan.');
             ensureCashFinanceData();
             const date = document.getElementById('cashOpeningDate')?.value || today();
@@ -6051,10 +6157,10 @@ let pendingPurchaseBahanId = null;
             upsertCashLedger({ id, type: 'opening', date, amount, cashAccountType: a.type, cashAccountUid: accountUid, ownerUid: currentUser?.uid || '', ownerName: a.name, createdByUid: currentUser?.uid || '', createdByName: a.name, updatedAt: new Date().toISOString() });
             if (a.type === 'kasir') db.settings.cashOpeningByUser[a.uid] = { date, amount, createdByUid: a.uid, createdBy: a.name };
             else db.settings.cashOpening = { date, amount };
-            save(); renderAll(); toast('Saldo awal ' + (a.type === 'kasir' ? 'kasir' : 'admin') + ' berhasil disimpan.');
+            await save(); renderAll(); toast('Saldo awal ' + (a.type === 'kasir' ? 'kasir' : 'admin') + ' berhasil disimpan.');
         }
 
-        function saveCashEntry() {
+        async function saveCashEntry() {
             if (!isAdminClient() && !isKasirClient()) return toast('Akses transaksi kas tidak diizinkan.');
             ensureCashFinanceData();
             const type = document.getElementById('cashEntryType')?.value || 'modal';
@@ -6075,7 +6181,7 @@ let pendingPurchaseBahanId = null;
             } else {
                 db.cashLedger.push({ id, type, date, amount, note, cashAccountType: a.type, cashAccountUid: a.type === 'admin' ? (currentUser?.uid || 'admin') : a.uid, ownerUid: currentUser?.uid || '', ownerName: a.name, createdByUid: currentUser?.uid || '', createdByName: a.name });
             }
-            save();
+            await save();
             document.getElementById('cashEntryAmount').value = '';
             document.getElementById('cashEntryNote').value = '';
             if (document.getElementById('cashTransferUid')) document.getElementById('cashTransferUid').value = '';
@@ -6253,6 +6359,7 @@ let pendingPurchaseBahanId = null;
         async function saveAdminName() {
             if (!isAdminClient()) return toast('Hanya Admin yang dapat mengubah nama Admin.');
             if (!firebaseReady || !currentUser) return toast('Firebase belum siap. Login kembali.');
+            try { requireOnlineCheckout(); } catch (e) { return toast(e.message); }
             const input = document.getElementById('adminNameSetting');
             const name = String(input?.value || '').trim();
             if (!name) return toast('Nama Admin wajib diisi.');
@@ -6433,6 +6540,7 @@ let pendingPurchaseBahanId = null;
         async function saveKasirName(ev, uid) {
             ev.preventDefault();
             if (!isAdminClient()) return toast('Hanya Admin yang dapat mengubah user.');
+            try { requireOnlineCheckout(); } catch (e) { return toast(e.message); }
             const name = String(document.getElementById('editKasirName')?.value || '').trim();
             if (!name) return toast('Nama Kasir wajib diisi.');
             const btn = document.getElementById('saveEditKasirBtn');
@@ -6453,6 +6561,7 @@ let pendingPurchaseBahanId = null;
         async function toggleKasirUser(uid, currentlyActive) {
             if (!isAdminClient()) return toast('Hanya Admin yang dapat mengubah user.');
             if (!confirm((currentlyActive ? 'Nonaktifkan' : 'Aktifkan') + ' akun Kasir ini?')) return;
+            try { requireOnlineCheckout(); } catch (e) { return toast(e.message); }
             try {
                 await fbFs.doc('users/' + uid).set({ disabled: currentlyActive, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
                 await renderKasirUsers();
@@ -6468,6 +6577,7 @@ let pendingPurchaseBahanId = null;
             const file = document.getElementById('shopLogo')?.files?.[0];
             try {
                 if (!currentUser || !firebaseReady) throw new Error('Belum terhubung ke Firebase. Login kembali lalu coba lagi.');
+                requireOnlineCheckout();
                 if (!isAdminClient()) throw new Error('Hanya Admin yang dapat mengubah pengaturan usaha.');
 
                 let logo = oldLogo;
@@ -6495,8 +6605,9 @@ let pendingPurchaseBahanId = null;
                     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                 }, { merge: true });
                 localStorage.setItem(KEY, JSON.stringify(db));
+                lastCommittedDb = cloneDb(db);
                 renderAll();
-                toast('Pengaturan tersimpan');
+                toast('Pengaturan tersimpan di Firestore');
             } catch (e) {
                 console.error('saveSettings:', e);
                 toast(e?.message || 'Gagal menyimpan pengaturan');
