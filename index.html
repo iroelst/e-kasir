@@ -3481,8 +3481,14 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                     : recordBelongsToCurrentUser(row, (name === 'purchases' || name === 'stock') ? 'purchase' : 'expense'))) continue;
                 const id = firestoreDocumentId(name, row);
                 currentIds.add(id);
-                const payload = { ...row };
-                delete payload.__docId;
+                const prior = previous.find(oldRow => {
+                    try { return firestoreDocumentId(name, oldRow) === id; } catch (_) { return false; }
+                });
+                const clean = value => { const copy = { ...(value || {}) }; delete copy.__docId; return copy; };
+                // Jangan menulis ulang dokumen lama yang tidak berubah. Ini penting
+                // untuk data legacy Kasir yang belum memiliki seluruh field kepemilikan.
+                if (prior && JSON.stringify(clean(prior)) === JSON.stringify(clean(row))) continue;
+                const payload = clean(row);
                 await ref.doc(id).set(payload, { merge: true });
             }
             // Delete only documents removed from the last server-confirmed snapshot.
@@ -5600,10 +5606,18 @@ let pendingPurchaseBahanId = null;
             sharedStockPurchases = [...(sharedStockPurchases || []).filter(x => !(String(x.id) === String(purchase.id) && String(x.createdByUid || x.cashierUid || '') === String(purchase.createdByUid || purchase.cashierUid || ''))), purchase];
             syncPurchaseToStockMove(purchase);
             recalculateStockPeriods();
-            await save();
-            closeModal();
-            renderAll();
-            toast(editId ? 'Pembelian berhasil diperbarui dan stok disesuaikan.' : `Pembelian tersimpan · stok bertambah ${formatQty(purchase.qty)} ${b.unit}`);
+            const saveButton = document.querySelector('#modalBody button[onclick^="savePurchase("]');
+            if (saveButton) { saveButton.disabled = true; saveButton.textContent = 'Menyimpan...'; }
+            try {
+                await save();
+                closeModal();
+                renderAll();
+                toast(editId ? 'Data pembelian berhasil diperbarui. Stok telah disesuaikan.' : `Data pembelian berhasil disimpan. Stok bertambah ${formatQty(purchase.qty)} ${b.unit}.`);
+            } catch (error) {
+                if (saveButton) { saveButton.disabled = false; saveButton.textContent = editId ? 'Simpan Perubahan' : 'Simpan Pembelian'; }
+                console.error('Gagal menyimpan pembelian:', error);
+                // save() sudah memulihkan data dan menampilkan pesan error.
+            }
         }
 
         async function deletePurchase(id, ownerUid = '') {
@@ -5714,10 +5728,18 @@ let pendingPurchaseBahanId = null;
                 createdByName: existing?.createdByName || existing?.cashierName || currentUserName || currentUser?.displayName || 'User' };
             if (editId) db.expenses = db.expenses.map(x => String(x.id) === String(editId) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid)) ? item : x);
             else db.expenses.push(item);
-            await save();
-            closeModal();
-            renderAll();
-            toast(editId ? 'Pengeluaran berhasil diperbarui.' : 'Pengeluaran tersimpan');
+            const saveButton = document.querySelector('#modalBody button[onclick^="saveExpense("]');
+            if (saveButton) { saveButton.disabled = true; saveButton.textContent = 'Menyimpan...'; }
+            try {
+                await save();
+                closeModal();
+                renderAll();
+                toast(editId ? 'Data pengeluaran berhasil diperbarui.' : 'Data pengeluaran berhasil disimpan.');
+            } catch (error) {
+                if (saveButton) { saveButton.disabled = false; saveButton.textContent = editId ? 'Simpan Perubahan' : 'Simpan'; }
+                console.error('Gagal menyimpan pengeluaran:', error);
+                // save() menampilkan alasan kegagalan; form sengaja tetap terbuka.
+            }
         }
 
         async function deleteExpense(id, ownerUid = '') {
@@ -6296,11 +6318,20 @@ let pendingPurchaseBahanId = null;
             } else {
                 db.cashLedger.push({ id, type, date, amount, note, cashAccountType: a.type, cashAccountUid: a.type === 'admin' ? (currentUser?.uid || 'admin') : a.uid, ownerUid: currentUser?.uid || '', ownerName: a.name, createdByUid: currentUser?.uid || '', createdByName: a.name });
             }
-            await save();
-            document.getElementById('cashEntryAmount').value = '';
-            document.getElementById('cashEntryNote').value = '';
-            if (document.getElementById('cashTransferUid')) document.getElementById('cashTransferUid').value = '';
-            renderAll(); toast('Transaksi kas berhasil disimpan.');
+            const cashSaveButton = document.querySelector('button[onclick="saveCashEntry()"]');
+            if (cashSaveButton) { cashSaveButton.disabled = true; cashSaveButton.textContent = 'Menyimpan...'; }
+            try {
+                await save();
+                document.getElementById('cashEntryAmount').value = '';
+                document.getElementById('cashEntryNote').value = '';
+                if (document.getElementById('cashTransferUid')) document.getElementById('cashTransferUid').value = '';
+                renderAll(); toast('Transaksi kas berhasil disimpan.');
+            } catch (error) {
+                console.error('Gagal menyimpan transaksi kas:', error);
+                // Nilai form tetap dipertahankan agar pengguna tidak kehilangan input.
+            } finally {
+                if (cashSaveButton) { cashSaveButton.disabled = false; cashSaveButton.textContent = 'Simpan Transaksi Kas'; }
+            }
         }
 
         function openCashLedgerEdit(id) {
