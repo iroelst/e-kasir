@@ -4679,7 +4679,7 @@ let pendingPurchaseBahanId = null;
                 usageTotal += uv;
                 endingTotal += ev;
                 const safe = x.ending > (+b.min || 0);
-                return `<tr><td><b>${b.name}</b></td><td>${formatQty(b.content)} ${b.unit}</td><td>${rupiah(averageUnitCost(b, r.to) * (+b.content || 0))}</td><td>${formatQty(x.opening)} ${b.unit}</td><td>${formatQty(x.purchases)} ${b.unit}</td><td>${formatQty(x.used)} ${b.unit}</td><td><b>${formatQty(Math.max(0,x.ending))} ${b.unit}</b></td><td><b>${rupiah(ev)}</b></td><td><span class="badge ${safe?'ok':'warn'}">${safe?'Aman':'Menipis'}</span></td><td><button class="btn" onclick="editBahan(${JSON.stringify(b.id)})">Edit</button></td></tr>`
+                return `<tr><td><b>${b.name}</b></td><td>${formatQty(b.content)} ${b.unit}</td><td>${rupiah(averageUnitCost(b, r.to) * (+b.content || 0))}</td><td>${formatQty(x.opening)} ${b.unit}</td><td>${formatQty(x.purchases)} ${b.unit}</td><td>${formatQty(x.used)} ${b.unit}</td><td><b>${formatQty(Math.max(0,x.ending))} ${b.unit}</b></td><td><b>${rupiah(ev)}</b></td><td><span class="badge ${safe?'ok':'warn'}">${safe?'Aman':'Menipis'}</span></td><td><button class="btn" data-bahan-id="${escapeHtml(String(b.id))}" onclick="window.editBahan(this.getAttribute('data-bahan-id'))">Edit</button></td></tr>`
             }).join('') || '<tr><td colspan="10"><div class="empty">Belum ada bahan. Tambahkan bahan terlebih dahulu.</div></td></tr>';
             stockOpeningTotal.textContent = rupiah(openingTotal);
             stockPurchaseTotal.textContent = rupiah(purchaseTotal);
@@ -5383,7 +5383,7 @@ let pendingPurchaseBahanId = null;
                 cost: '',
                 min: ''
             };
-            openModal(id ? 'Edit Bahan' : 'Tambah Bahan', `<div class="form-grid"><div class="field"><label>NAMA BAHAN</label><input id="bName" value="${b.name}"></div><div class="field"><label>SATUAN DASAR</label><select id="bUnit"><option value="gram" ${b.unit==='gram'?'selected':''}>gram</option><option value="ml" ${b.unit==='ml'?'selected':''}>ml</option><option value="pcs" ${b.unit==='pcs'?'selected':''}>pcs</option></select></div><div class="field"><label>ISI 1 KEMASAN</label><input id="bContent" type="number" step="${b.unit==='pcs'?'1':'0.01'}" min="${b.unit==='pcs'?'1':'0.01'}" value="${b.content||''}" placeholder="Contoh: 1000"><small style="color:var(--muted)">Contoh: 1000 gram, 1000 ml, atau 50 pcs</small></div><div class="field"><label>HARGA 1 KEMASAN</label><input id="bCost" type="number" min="0" value="${b.cost}"></div><div class="field"><label>MINIMUM STOK (${b.unit})</label><input id="bMin" type="number" step="0.01" min="0" value="${b.min}"></div></div><div style="margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:var(--muted);font-size:13px">Harga dasar otomatis: <b id="baseCostPreview">-</b> / ${b.unit}</div><button type="button" class="btn primary" style="margin-top:15px" onclick="saveBahan(${id !== null && id !== undefined ? JSON.stringify(id) : 0})">Simpan</button>`);
+            openModal(id ? 'Edit Bahan' : 'Tambah Bahan', `<div class="form-grid"><div class="field"><label>NAMA BAHAN</label><input id="bName" value="${b.name}"></div><div class="field"><label>SATUAN DASAR</label><select id="bUnit"><option value="gram" ${b.unit==='gram'?'selected':''}>gram</option><option value="ml" ${b.unit==='ml'?'selected':''}>ml</option><option value="pcs" ${b.unit==='pcs'?'selected':''}>pcs</option></select></div><div class="field"><label>ISI 1 KEMASAN</label><input id="bContent" type="number" step="${b.unit==='pcs'?'1':'0.01'}" min="${b.unit==='pcs'?'1':'0.01'}" value="${b.content||''}" placeholder="Contoh: 1000"><small style="color:var(--muted)">Contoh: 1000 gram, 1000 ml, atau 50 pcs</small></div><div class="field"><label>HARGA 1 KEMASAN</label><input id="bCost" type="number" min="0" value="${b.cost}"></div><div class="field"><label>MINIMUM STOK (${b.unit})</label><input id="bMin" type="number" step="0.01" min="0" value="${b.min}"></div></div><div style="margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:var(--muted);font-size:13px">Harga dasar otomatis: <b id="baseCostPreview">-</b> / ${b.unit}</div><button type="button" class="btn primary" style="margin-top:15px" data-bahan-id="${id !== null && id !== undefined ? escapeHtml(String(id)) : '0'}" onclick="window.saveBahan(this.getAttribute('data-bahan-id'))">Simpan</button>`);
             const update = () => {
                 const c = +(document.getElementById('bContent')?.value || 0),
                     p = +(document.getElementById('bCost')?.value || 0),
@@ -5451,6 +5451,10 @@ let pendingPurchaseBahanId = null;
                 console.error('Gagal menyimpan bahan:', e);
             }
         }
+
+        // Handler global dipanggil oleh tombol modal melalui data attribute yang aman.
+        window.editBahan = editBahan;
+        window.saveBahan = saveBahan;
 
         function openBahanForPurchase() {
             returnToPurchase = true;
