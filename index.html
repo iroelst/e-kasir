@@ -3670,19 +3670,22 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             return d;
         }
 
+        function isFullCalendarMonth(from, to) {
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(String(from || '')) || !/^\d{4}-\d{2}-\d{2}$/.test(String(to || ''))) return false;
+            const month = String(from).slice(0, 7);
+            const [year, monthNumber] = month.split('-').map(Number);
+            const expectedTo = `${month}-${String(new Date(year, monthNumber, 0).getDate()).padStart(2, '0')}`;
+            return from === `${month}-01` && to === expectedTo;
+        }
+
         function ensurePeriod(key, from, to) {
-            if (db.stockPeriods[key]) return db.stockPeriods[key];
-            let opening = {};
-            const candidates = Object.values(db.stockPeriods).filter(x => x && x.to && x.to < from).sort((a, b) => String(b.to).localeCompare(String(a.to)));
-            if (candidates.length) opening = JSON.parse(JSON.stringify(candidates[0].ending || {}));
-            db.stockPeriods[key] = {
-                from,
-                to,
-                opening,
-                openingDate: null,
-                ending: {}
-            };
-            return db.stockPeriods[key];
+            // Firestore stockPeriods hanya menyimpan periode bulanan. Rentang laporan
+            // khusus dihitung sementara dan tidak pernah dibuat menjadi dokumen baru.
+            if (isFullCalendarMonth(from, to)) {
+                if (!db.stockPeriods[key]) db.stockPeriods[key] = { from, to, opening: {}, openingDate: null, ending: {} };
+                return db.stockPeriods[key];
+            }
+            return { from, to, opening: {}, openingDate: null, ending: {} };
         }
 
         function inRange(date, from, to) {
@@ -3771,19 +3774,54 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
         }
 
         function stockSummary(b, from, to) {
-            const key = rangeKey(from, to),
-                p = ensurePeriod(key, from, to),
-                opening = +(p.opening[b.id] ?? 0),
-                purchases = stockPurchases(from, to).filter(x => String(x.bahanId) === String(b.id)).reduce((a, x) => a + (+x.qty || 0), 0),
-                used = usageForRange(b, from, to),
-                ending = opening + purchases - used;
-            p.ending[b.id] = ending;
-            return {
-                opening,
-                purchases,
-                used,
-                ending
+            // Saldo pembuka laporan harus dihitung dari tanggal mulai stok usaha,
+            // bukan dari stockPeriods dengan rentang kustom yang mungkin tumpang tindih.
+            // Rentang kustom (mis. Jan-Nov lalu Feb-Nov) tidak boleh menjadi saldo
+            // pembuka bagi rentang laporan lain karena akan menggandakan pembelian.
+            const key = rangeKey(from, to);
+            const isMonthlyPeriod = isFullCalendarMonth(from, to);
+            const p = isMonthlyPeriod ? (db.stockPeriods[key] || null) : null;
+            const startMonth = getStockStartMonth();
+            let opening = 0;
+            let effectiveFrom = from;
+
+            if (startMonth && /^\d{4}-\d{2}$/.test(startMonth)) {
+                const [sy, sm] = startMonth.split('-').map(Number);
+                const startDate = `${startMonth}-01`;
+                const startTo = `${startMonth}-${String(new Date(sy, sm, 0).getDate()).padStart(2, '0')}`;
+                const startKey = rangeKey(startDate, startTo);
+                const initialPeriod = db.stockPeriods[startKey] || Object.values(db.stockPeriods || {}).find(x => x && x.from === startDate && x.to === startTo);
+                const initialOpening = Number(initialPeriod?.opening?.[b.id] ?? 0) || 0;
+
+                if (from <= startDate) {
+                    opening = from === startDate ? initialOpening : 0;
+                    effectiveFrom = startDate;
+                } else {
+                    const dayBefore = new Date(from + 'T00:00:00');
+                    dayBefore.setDate(dayBefore.getDate() - 1);
+                    const priorTo = `${dayBefore.getFullYear()}-${String(dayBefore.getMonth()+1).padStart(2,'0')}-${String(dayBefore.getDate()).padStart(2,'0')}`;
+                    const priorPurchases = stockPurchases(startDate, priorTo)
+                        .filter(x => String(x.bahanId) === String(b.id))
+                        .reduce((sum, x) => sum + (Number(x.qty) || 0), 0);
+                    const priorUsed = usageForRange(b, startDate, priorTo);
+                    opening = initialOpening + priorPurchases - priorUsed;
+                }
+            } else {
+                // Kompatibilitas data lama yang belum memiliki pengaturan bulan mulai.
+                opening = Number(p?.opening?.[b.id] ?? 0) || 0;
             }
+
+            const purchases = effectiveFrom <= to
+                ? stockPurchases(effectiveFrom, to)
+                    .filter(x => String(x.bahanId) === String(b.id))
+                    .reduce((sum, x) => sum + (Number(x.qty) || 0), 0)
+                : 0;
+            const used = effectiveFrom <= to ? usageForRange(b, effectiveFrom, to) : 0;
+            const ending = opening + purchases - used;
+            // Hanya saldo periode bulanan yang boleh disimpan. Hasil rentang laporan
+            // custom bersifat kalkulasi sementara, bukan dokumen stockPeriods.
+            if (isMonthlyPeriod && p) p.ending[b.id] = ending;
+            return { opening, purchases, used, ending };
         }
         // ===== MODAL + RESEP HELPERS =====
         let menuRecipeDraft = [];
@@ -4618,8 +4656,7 @@ let pendingPurchaseBahanId = null;
         async function changeStockRange() {
             const r = getRange();
             if (r.from > r.to) return toast('Tanggal awal tidak boleh melewati tanggal akhir');
-            ensurePeriod(rangeKey(r.from, r.to), r.from, r.to);
-            await save();
+            // Mengganti filter laporan tidak boleh membuat dokumen stockPeriods baru.
             renderAll()
         }
 
@@ -5470,6 +5507,18 @@ let pendingPurchaseBahanId = null;
             return false;
         }
 
+        function removeReportOnlyStockPeriods() {
+            // Hapus hanya cache rentang custom yang kosong (tanpa saldo manual).
+            // Periode custom yang memiliki opening/openingDate dipertahankan sebagai
+            // data historis agar tidak menghilangkan input manual lama tanpa audit.
+            Object.entries(db.stockPeriods || {}).forEach(([key, period]) => {
+                if (!period || isFullCalendarMonth(period.from, period.to)) return;
+                const opening = period.opening && typeof period.opening === 'object' ? period.opening : {};
+                const hasManualOpening = Object.values(opening).some(value => Number(value) !== 0) || !!period.openingDate;
+                if (!hasManualOpening) delete db.stockPeriods[key];
+            });
+        }
+
         function recalculateStockPeriods() {
             const startMonth = getStockStartMonth();
             if (!startMonth || !/^\d{4}-\d{2}$/.test(startMonth)) return;
@@ -5483,7 +5532,7 @@ let pendingPurchaseBahanId = null;
             (sharedStockPurchases || []).forEach(x => { if (x?.date) relevantDates.push(String(x.date)); });
             (db.transactions || []).forEach(x => { if (x?.date) relevantDates.push(String(x.date)); });
             (sharedStockTransactions || []).forEach(x => { if (x?.date) relevantDates.push(String(x.date)); });
-            Object.values(db.stockPeriods || {}).forEach(x => { if (x?.to) relevantDates.push(String(x.to)); });
+            Object.values(db.stockPeriods || {}).forEach(x => { if (x?.to && isFullCalendarMonth(x.from, x.to)) relevantDates.push(String(x.to)); });
             const maxDate = relevantDates.filter(x => /^\d{4}-\d{2}-\d{2}$/.test(x)).sort().pop() || today();
             const maxMonth = maxDate.slice(0, 7);
             const [sy, sm] = startMonth.split('-').map(Number);
@@ -5521,6 +5570,7 @@ let pendingPurchaseBahanId = null;
                 month++;
                 if (month > 12) { month = 1; year++; }
             }
+            removeReportOnlyStockPeriods();
         }
 
         function syncPurchaseToStockMove(purchase) {
