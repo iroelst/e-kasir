@@ -5767,15 +5767,15 @@ let pendingPurchaseBahanId = null;
                 const payload = { ...item };
                 delete payload.__docId;
 
-                let docRef;
-                if (existing) {
-                    const existingDocId = existing.__docId || firestoreDocumentId('expenses', existing);
-                    docRef = colRef('expenses').doc(existingDocId);
-                    await docRef.set(payload, { merge: true });
-                } else {
-                    const added = await colRef('expenses').add(payload);
-                    docRef = added;
-                }
+                // Gunakan pola ID dokumen yang sama dengan penyimpanan koleksi
+                // expenses lainnya: UID pemilik + ID data. Jangan gunakan add()
+                // karena ID acak dapat ditolak Rules yang memvalidasi kepemilikan
+                // berdasarkan UID pada path dokumen.
+                const expenseDocId = existing
+                    ? String(existing.__docId || firestoreDocumentId('expenses', existing))
+                    : firestoreDocumentId('expenses', item);
+                const docRef = colRef('expenses').doc(expenseDocId);
+                await docRef.set(payload, existing ? { merge: true } : {});
 
                 item.__docId = docRef.id;
 
