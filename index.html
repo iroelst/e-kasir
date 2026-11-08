@@ -3495,7 +3495,26 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                 // untuk data legacy Kasir yang belum memiliki seluruh field kepemilikan.
                 if (prior && JSON.stringify(clean(prior)) === JSON.stringify(clean(row))) continue;
                 const payload = clean(row);
-                await ref.doc(id).set(payload, { merge: true });
+                try {
+                    await ref.doc(id).set(payload, { merge: true });
+                } catch (error) {
+                    const ownerFields = ['createdByUid', 'cashierUid', 'ownerUid', 'cashAccountUid']
+                        .filter(field => Object.prototype.hasOwnProperty.call(payload, field))
+                        .map(field => field + '=' + String(payload[field])).join(', ') || '(tidak ada field pemilik)';
+                    const detail = new Error(
+                        'Firestore menolak SET koleksi "' + name + '" pada dokumen "' + id + '". ' +
+                        'Kode: ' + (error?.code || 'tidak diketahui') + '. ' +
+                        'UID login: ' + String(currentUser?.uid || '-') + '. ' +
+                        'Field pemilik: ' + ownerFields + '. ' +
+                        (error?.message || 'Missing or insufficient permissions.')
+                    );
+                    detail.code = error?.code || 'firestore/write-denied';
+                    detail.collection = name;
+                    detail.documentId = id;
+                    detail.operation = 'set';
+                    detail.cause = error;
+                    throw detail;
+                }
             }
             // Delete only documents removed from the last server-confirmed snapshot.
             // Never perform a collection-wide delete based on a partial Kasir view.
@@ -3505,7 +3524,24 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                     : recordBelongsToCurrentUser(row, (name === 'purchases' || name === 'stock') ? 'purchase' : 'expense'))) continue;
                 let id;
                 try { id = firestoreDocumentId(name, row); } catch (_) { continue; }
-                if (!currentIds.has(id)) await ref.doc(id).delete();
+                if (!currentIds.has(id)) {
+                    try {
+                        await ref.doc(id).delete();
+                    } catch (error) {
+                        const detail = new Error(
+                            'Firestore menolak DELETE koleksi "' + name + '" pada dokumen "' + id + '". ' +
+                            'Kode: ' + (error?.code || 'tidak diketahui') + '. ' +
+                            'UID login: ' + String(currentUser?.uid || '-') + '. ' +
+                            (error?.message || 'Missing or insufficient permissions.')
+                        );
+                        detail.code = error?.code || 'firestore/delete-denied';
+                        detail.collection = name;
+                        detail.documentId = id;
+                        detail.operation = 'delete';
+                        detail.cause = error;
+                        throw detail;
+                    }
+                }
             }
         }
         async function persistDbDirect(candidate, baseline) {
@@ -3576,7 +3612,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                     }
                     setCloudStatus('Gagal menyimpan ke Firestore');
                     console.error('Penyimpanan langsung Firestore gagal:', e);
-                    toast('Perubahan ditolak. Firestore gagal menyimpan: ' + (e.message || 'Kesalahan jaringan/rules.'));
+                    toast('Perubahan ditolak. ' + (e.message || 'Firestore gagal menyimpan; periksa Rules dan koneksi.'));
                     throw e;
                 }
             });
