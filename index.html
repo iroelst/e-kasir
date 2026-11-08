@@ -3271,14 +3271,17 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             const primary = await ref.where(ownerField, '==', currentUser.uid).get();
             primary.docs.forEach(d => docs.set(d.id, { __docId: d.id, ...d.data() }));
             // Compatibilidad con registros antiguos que guardaban el UID en el campo alternativo.
-            const alternateField = ownerField === 'cashierUid' ? 'createdByUid'
-                : ownerField === 'createdByUid' ? 'cashierUid' : 'createdByUid';
-            if (alternateField !== ownerField) {
+            const alternateFields = name === 'cashLedger'
+                ? ['cashAccountUid', 'createdByUid']
+                : [ownerField === 'cashierUid' ? 'createdByUid'
+                    : ownerField === 'createdByUid' ? 'cashierUid' : 'createdByUid'];
+            for (const alternateField of alternateFields) {
+                if (alternateField === ownerField) continue;
                 try {
                     const alternate = await ref.where(alternateField, '==', currentUser.uid).get();
                     alternate.docs.forEach(d => docs.set(d.id, { __docId: d.id, ...d.data() }));
                 } catch (e) {
-                    // Rules lama mungkin hanya mengizinkan query pada ownerField utama.
+                    // Kompatibilitas field kepemilikan lama; query utama tetap dipertahankan.
                     console.warn('Query kompatibilitas ' + name + '.' + alternateField + ' dilewati:', e?.code || e?.message || e);
                 }
             }
@@ -3523,7 +3526,9 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             } else if (isKasirClient()) {
                 await Promise.all([
                     writeCollectionDiff('purchases', candidate.purchases, baseline.purchases, true),
-                    writeCollectionDiff('stock', candidate.stockMoves, baseline.stockMoves, true),
+                    // Kasir tidak menulis koleksi stock. Dokumen pembelian di koleksi
+                    // purchases sudah menjadi sumber pergerakan stok bersama melalui
+                    // sharedStockPurchases; Rules memang membatasi tulis stock untuk admin.
                     writeCollectionDiff('expenses', candidate.expenses, baseline.expenses, true),
                     writeCollectionDiff('cashLedger', candidate.cashLedger || [], baseline.cashLedger || [], true)
                 ]);
@@ -5451,10 +5456,11 @@ let pendingPurchaseBahanId = null;
         }
 
         function openPurchaseModal(editId = null, ownerUid = '') {
-            if (editId && !isAdminClient()) return toast('Hanya Admin yang dapat mengedit pembelian.');
+            if (editId && !isAdminClient() && !isKasirClient()) return toast('Akses edit pembelian tidak diizinkan.');
             const r = getRange();
             const editing = editId ? db.purchases.find(x => String(x.id) === String(editId) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid))) : null;
             if (editId && !editing) return toast('Data pembelian tidak ditemukan.');
+            if (editing && !canManagePurchaseRecord(editing)) return toast('Anda hanya dapat mengubah pembelian milik akun sendiri.');
             if (!db.bahan.length) return openModal('Pembelian Bahan', `<div class="empty">Belum ada bahan yang terdaftar.<div style="margin-top:12px"><button class="btn primary admin-only" onclick="openBahanForPurchase()">＋ Tambah Bahan Baru</button></div></div>`);
             const selectedId = editing ? editing.bahanId : pendingPurchaseBahanId;
             const opts = db.bahan.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'id', { sensitivity: 'base', numeric: true })).map(b => `<option value="${b.id}" ${selectedId===b.id?'selected':''}>${b.name}</option>`).join('');
@@ -5589,45 +5595,115 @@ let pendingPurchaseBahanId = null;
         }
 
         async function savePurchase(editId = 0, ownerUid = '') {
-            const b = db.bahan.find(x => x.id === +(document.getElementById('pBahan')?.value || 0));
+            if (!isAdminClient() && !isKasirClient()) return toast('Akses pembelian tidak diizinkan.');
+            if (!navigator.onLine || !cloudDataReady || !firebaseReady ||
+                !currentUser?.uid || !fbAuth?.currentUser || fbAuth.currentUser.uid !== currentUser.uid) {
+                return toast('Tidak dapat menyimpan pembelian: koneksi atau sesi Firebase belum siap.');
+            }
+
+            const b = db.bahan.find(x => String(x.id) === String(document.getElementById('pBahan')?.value || ''));
             const date = document.getElementById('pDate')?.value || '';
-            const n = +(document.getElementById('pPackages')?.value || 0);
-            const price = +(document.getElementById('pCost')?.value || 0);
-            const content = +(document.getElementById('pContent')?.value || 0);
+            const n = Number(document.getElementById('pPackages')?.value || 0);
+            const price = Number(document.getElementById('pCost')?.value || 0);
+            const content = Number(document.getElementById('pContent')?.value || 0);
             const note = (document.getElementById('pNote')?.value || '').trim();
-            if (!b) return toast('Pilih bahan');
-            if (!date) return toast('Tanggal pembelian wajib diisi');
-            if (n <= 0 || !Number.isInteger(n)) return toast('Jumlah kemasan harus bilangan bulat lebih dari 0');
-            if (content <= 0 || !Number.isFinite(content)) return toast('Isi per kemasan harus lebih dari 0');
-            if (b.unit === 'pcs' && !Number.isInteger(content)) return toast('Isi per kemasan untuk satuan pcs harus bilangan bulat');
-            if (price < 0) return toast('Harga kemasan tidak valid');
-            const existing = editId ? db.purchases.find(x => String(x.id) === String(editId) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid))) : null;
+            if (!b) return toast('Pilih bahan.');
+            if (!date) return toast('Tanggal pembelian wajib diisi.');
+            if (!Number.isInteger(n) || n <= 0) return toast('Jumlah kemasan harus bilangan bulat lebih dari 0.');
+            if (!Number.isFinite(content) || content <= 0) return toast('Isi per kemasan harus lebih dari 0.');
+            if (b.unit === 'pcs' && !Number.isInteger(content)) return toast('Isi per kemasan untuk satuan pcs harus bilangan bulat.');
+            if (!Number.isFinite(price) || price < 0) return toast('Harga kemasan tidak valid.');
+
+            const existing = editId ? db.purchases.find(x => String(x.id) === String(editId) &&
+                (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid))) : null;
             if (editId && !existing) return toast('Data pembelian tidak ditemukan.');
-            const purchase = { id: editId || db.nextId++, type:'purchase', date, bahanId:b.id, bahanName:b.name, packages:n, contentPerPackage:content, qty:n*content, unit:b.unit, cost:price, total:n*price, note, cashAccountType: existing?.cashAccountType || (isKasirClient() ? 'kasir' : 'admin'), cashAccountUid: existing?.cashAccountUid || currentUser?.uid || '', createdByUid: existing?.createdByUid || existing?.cashierUid || currentUser?.uid || '', createdByName: existing?.createdByName || existing?.cashierName || currentUserName || 'User' };
-            if (editId) db.purchases = db.purchases.map(x => String(x.id) === String(editId) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid)) ? purchase : x);
-            else db.purchases.push(purchase);
-            sharedStockPurchases = [...(sharedStockPurchases || []).filter(x => !(String(x.id) === String(purchase.id) && String(x.createdByUid || x.cashierUid || '') === String(purchase.createdByUid || purchase.cashierUid || ''))), purchase];
+            if (existing && !canManagePurchaseRecord(existing)) return toast('Anda hanya dapat mengubah pembelian milik akun sendiri.');
+
+            const previousShared = (sharedStockPurchases || []).map(x => ({ ...x }));
+            const uid = String(currentUser.uid);
+            const purchase = {
+                ...(existing || {}), // pertahankan __docId dan metadata historis saat edit
+                id: existing ? existing.id : db.nextId++,
+                type: 'purchase', date, bahanId: b.id, bahanName: b.name,
+                packages: n, contentPerPackage: content, qty: n * content,
+                unit: b.unit, cost: price, total: n * price, note,
+                cashAccountType: existing?.cashAccountType || (isKasirClient() ? 'kasir' : 'admin'),
+                cashAccountUid: existing?.cashAccountUid || uid,
+                createdByUid: existing?.createdByUid || existing?.cashierUid || uid,
+                createdByName: existing?.createdByName || existing?.cashierName || currentUserName || 'User',
+                updatedAt: new Date().toISOString()
+            };
+
+            if (existing) {
+                const index = db.purchases.findIndex(x => String(x.id) === String(existing.id) &&
+                    String(x.createdByUid || x.cashierUid || '') === String(purchase.createdByUid));
+                if (index >= 0) db.purchases[index] = purchase;
+                else db.purchases.push(purchase);
+            } else {
+                db.purchases.push(purchase);
+            }
+            sharedStockPurchases = [...(sharedStockPurchases || []).filter(x =>
+                !(String(x.id) === String(purchase.id) &&
+                  String(x.createdByUid || x.cashierUid || '') === String(purchase.createdByUid))), purchase];
             syncPurchaseToStockMove(purchase);
             recalculateStockPeriods();
+
             const saveButton = document.querySelector('#modalBody button[onclick^="savePurchase("]');
             if (saveButton) { saveButton.disabled = true; saveButton.textContent = 'Menyimpan...'; }
             try {
                 await save();
                 closeModal();
                 renderAll();
-                toast(editId ? 'Data pembelian berhasil diperbarui. Stok telah disesuaikan.' : `Data pembelian berhasil disimpan. Stok bertambah ${formatQty(purchase.qty)} ${b.unit}.`);
+                toast(existing ? 'Data pembelian berhasil diperbarui. Stok telah disesuaikan.'
+                    : `Data pembelian berhasil disimpan. Stok bertambah ${formatQty(purchase.qty)} ${b.unit}.`);
             } catch (error) {
-                if (saveButton) { saveButton.disabled = false; saveButton.textContent = editId ? 'Simpan Perubahan' : 'Simpan Pembelian'; }
+                sharedStockPurchases = previousShared;
+                recalculateStockPeriods();
+                renderAll();
                 console.error('Gagal menyimpan pembelian:', error);
-                // save() sudah memulihkan data dan menampilkan pesan error.
+                if (saveButton?.isConnected) {
+                    saveButton.disabled = false;
+                    saveButton.textContent = existing ? 'Simpan Perubahan' : 'Simpan Pembelian';
+                }
             }
         }
 
         async function deletePurchase(id, ownerUid = '') {
-            if (!isAdminClient()) return toast('Hanya Admin yang dapat menghapus pembelian.');
+            if (!isAdminClient() && !isKasirClient()) return toast('Akses menghapus pembelian tidak diizinkan.');
             const p = db.purchases.find(x => String(x.id) === String(id) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid)));
             if (!p) return toast('Data pembelian tidak ditemukan.');
+            if (!canManagePurchaseRecord(p)) return toast('Anda hanya dapat menghapus pembelian milik akun sendiri.');
             if (!confirm(`Hapus pembelian ${p.bahanName} tanggal ${formatDateID(p.date)}? Stok masuk dan nilai pembelian terkait akan ikut dibatalkan.`)) return;
+
+            // Kasir hanya menghapus dokumen pembeliannya sendiri. Gunakan diff yang
+            // sama dengan save(); jangan mencoba menghapus salinan di koleksi stock,
+            // karena koleksi tersebut memang hanya dapat ditulis Admin.
+            if (isKasirClient()) {
+                if (!navigator.onLine || !cloudDataReady || !firebaseReady ||
+                    !currentUser?.uid || !fbAuth?.currentUser || fbAuth.currentUser.uid !== currentUser.uid) {
+                    return toast('Penghapusan pembelian membutuhkan koneksi dan sesi Firebase aktif.');
+                }
+                const previousShared = (sharedStockPurchases || []).map(x => ({ ...x }));
+                const owner = String(p.createdByUid || p.cashierUid || '');
+                db.purchases = (db.purchases || []).filter(x => !(String(x.id) === String(id) &&
+                    String(x.createdByUid || x.cashierUid || '') === owner));
+                sharedStockPurchases = (sharedStockPurchases || []).filter(x => !(String(x.id) === String(id) &&
+                    String(x.createdByUid || x.cashierUid || '') === owner));
+                db.stockMoves = (db.stockMoves || []).filter(x => !(String(x.id) === String(id) &&
+                    String(x.createdByUid || x.cashierUid || '') === owner && x.type === 'purchase'));
+                recalculateStockPeriods();
+                try {
+                    await save();
+                    renderAll();
+                    toast('Pembelian berhasil dihapus. Stok dan laporan telah dihitung ulang.');
+                } catch (error) {
+                    sharedStockPurchases = previousShared;
+                    recalculateStockPeriods();
+                    renderAll();
+                    console.error('Gagal menghapus pembelian kasir:', error);
+                }
+                return;
+            }
             if (!navigator.onLine) return toast('Penghapusan pembelian membutuhkan koneksi internet.');
             if (!firebaseReady || !currentUser?.uid || !fbAuth?.currentUser || fbAuth.currentUser.uid !== currentUser.uid) {
                 return toast('Sesi Firebase belum siap. Silakan login ulang lalu coba lagi.');
@@ -5722,139 +5798,55 @@ let pendingPurchaseBahanId = null;
             const cat = (document.getElementById('eCat')?.value || '').trim();
             const note = (document.getElementById('eNote')?.value || '').trim();
             const amount = Number(document.getElementById('eAmount')?.value || 0);
-
             if (!date) return toast('Tanggal wajib diisi.');
             if (!cat) return toast('Kategori wajib diisi.');
             if (!Number.isFinite(amount) || amount <= 0) return toast('Masukkan jumlah yang valid dan lebih dari 0.');
 
-            const authUid = fbAuth?.currentUser?.uid || '';
-            const appUid = currentUser?.uid || '';
+            const authUid = String(fbAuth?.currentUser?.uid || '');
+            const appUid = String(currentUser?.uid || '');
             if (!navigator.onLine || !cloudDataReady || !firebaseReady || !authUid || authUid !== appUid) {
                 return toast('Tidak dapat menyimpan pengeluaran: koneksi atau sesi Firebase belum siap.');
             }
 
-            const existing = editId
-                ? db.expenses.find(x => String(x.id) === String(editId) &&
-                    (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid)))
-                : null;
+            const existing = editId ? db.expenses.find(x => String(x.id) === String(editId) &&
+                (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid))) : null;
             if (editId && !existing) return toast('Data pengeluaran tidak ditemukan.');
             if (existing && !recordBelongsToCurrentUser(existing, 'expense')) {
                 return toast('Anda hanya dapat mengubah pengeluaran milik akun sendiri.');
             }
 
-            const uid = authUid;
             const item = {
-                ...(existing || {}),
+                ...(existing || {}), // pertahankan __docId dan field historis yang tidak dikenal
                 id: existing ? existing.id : db.nextId++,
                 date, cat, note, amount,
                 cashAccountType: existing?.cashAccountType || (isKasirClient() ? 'kasir' : 'admin'),
-                cashAccountUid: existing?.cashAccountUid || uid,
-                createdByUid: existing?.createdByUid || existing?.cashierUid || uid,
+                cashAccountUid: existing?.cashAccountUid || authUid,
+                createdByUid: existing?.createdByUid || existing?.cashierUid || authUid,
                 createdByName: existing?.createdByName || existing?.cashierName ||
                     currentUserName || fbAuth?.currentUser?.displayName || 'User',
                 updatedAt: new Date().toISOString()
             };
 
-            // Untuk data baru gunakan add() agar Firestore membuat ID dokumen baru
-            // secara atomik. Untuk edit, gunakan __docId asli agar dokumen lama tidak
-            // berpindah atau tertimpa dokumen milik pengguna lain.
+            const index = existing ? db.expenses.findIndex(x =>
+                String(x.id) === String(existing.id) &&
+                String(x.createdByUid || x.cashierUid || '') === String(item.createdByUid)) : -1;
+            if (index >= 0) db.expenses[index] = item;
+            else db.expenses.push(item);
+
             const saveButton = document.querySelector('#modalBody button[onclick^="saveExpense("]');
-            const previous = existing ? { ...existing } : null;
             window.expenseSaving = true;
-            if (saveButton) {
-                saveButton.disabled = true;
-                saveButton.textContent = 'Menyimpan...';
-            }
-
+            if (saveButton) { saveButton.disabled = true; saveButton.textContent = 'Menyimpan...'; }
             try {
-                const payload = { ...item };
-                delete payload.__docId;
-
-                // Gunakan pola ID dokumen yang sama dengan penyimpanan koleksi
-                // expenses lainnya: UID pemilik + ID data. Jangan gunakan add()
-                // karena ID acak dapat ditolak Rules yang memvalidasi kepemilikan
-                // berdasarkan UID pada path dokumen.
-                const expenseDocId = existing
-                    ? String(existing.__docId || firestoreDocumentId('expenses', existing))
-                    : firestoreDocumentId('expenses', item);
-                const docRef = colRef('expenses').doc(expenseDocId);
-                await docRef.set(payload, existing ? { merge: true } : {});
-
-                item.__docId = docRef.id;
-
-                if (existing) {
-                    const index = db.expenses.findIndex(x =>
-                        String(x.id) === String(existing.id) &&
-                        String(x.createdByUid || x.cashierUid || '') === String(item.createdByUid));
-                    if (index >= 0) db.expenses[index] = item;
-                    else db.expenses.push(item);
-                } else {
-                    db.expenses.push(item);
-                }
-
-                if (lastCommittedDb) {
-                    const rows = Array.isArray(lastCommittedDb.expenses) ? lastCommittedDb.expenses : [];
-                    const idx = rows.findIndex(x => String(x.__docId || firestoreDocumentId('expenses', x)) === docRef.id);
-                    if (idx >= 0) rows[idx] = { ...item };
-                    else rows.push({ ...item });
-                    lastCommittedDb.expenses = rows;
-                }
-
+                // Gunakan satu jalur commit untuk semua data. save() menangani antrean,
+                // baseline server, rollback, status cloud, dan pesan kegagalan.
+                await save();
                 closeModal();
                 renderAll();
-                setCloudStatus('Pengeluaran tersimpan di Firestore', true);
                 toast(existing ? 'Data pengeluaran berhasil diperbarui.' : 'Data pengeluaran berhasil disimpan.');
             } catch (error) {
-                console.error('Gagal menyimpan pengeluaran:', {
-                    error,
-                    projectId: firebaseConfig?.projectId,
-                    shopId: SHOP_ID,
-                    collection: 'expenses',
-                    role: currentRole,
-                    appUid,
-                    authUid,
-                    createdByUid: item.createdByUid,
-                    operation: existing ? 'update' : 'create'
-                });
-
-                // Tampilkan error sebelum proses pemulihan/render yang mungkin ikut gagal.
-                const code = error?.code ? String(error.code) : 'tanpa-kode';
-                const detail = error?.message ? String(error.message) : String(error || 'Kesalahan tidak diketahui');
-                const diagnostic = 'Gagal menyimpan pengeluaran [' + code + ']: ' + detail;
-                try { toast(diagnostic); } catch (toastError) { console.error('Toast error:', toastError); }
-                // Diagnostik sementara: alert tetap terlihat meskipun toast tertutup/tertutup UI.
-                try { window.alert(diagnostic); } catch (alertError) { console.error('Alert error:', alertError); }
-                try {
-                    const body = document.getElementById('modalBody');
-                    if (body) {
-                        let panel = document.getElementById('expenseSaveError');
-                        if (!panel) {
-                            panel = document.createElement('div');
-                            panel.id = 'expenseSaveError';
-                            panel.style.cssText = 'display:block;margin:12px 0;padding:12px;border:2px solid #dc2626;border-radius:10px;background:#fff1f2;color:#991b1b;font-size:13px;line-height:1.5;white-space:normal;overflow-wrap:anywhere;';
-                            body.prepend(panel);
-                        }
-                        panel.textContent = diagnostic + ' | Proyek: ' +
-                            String(firebaseConfig?.projectId || 'tidak diketahui') +
-                            ' | Toko: ' + String(SHOP_ID || 'kosong');
-                    }
-                } catch (panelError) { console.error('Gagal menampilkan panel error:', panelError); }
-
-                if (existing && previous) {
-                    const index = db.expenses.findIndex(x =>
-                        String(x.__docId || '') === String(existing.__docId || ''));
-                    if (index >= 0) db.expenses[index] = previous;
-                } else {
-                    db.expenses = db.expenses.filter(x =>
-                        !(String(x.__docId || '') === String(item.__docId || '') &&
-                          String(x.createdByUid || '') === String(item.createdByUid)));
-                }
+                console.error('Gagal menyimpan pengeluaran:', error);
+                // save() mengembalikan db ke snapshot server terakhir bila commit gagal.
                 renderAll();
-
-                const operation = existing ? 'memperbarui' : 'membuat';
-                console.error('Detail operasi pengeluaran:', operation,
-                    'Path:', 'toko/' + SHOP_ID + '/expenses',
-                    'UID pembuat cocok:', item.createdByUid === authUid);
             } finally {
                 window.expenseSaving = false;
                 if (saveButton?.isConnected) {
@@ -5866,14 +5858,32 @@ let pendingPurchaseBahanId = null;
 
         async function deleteExpense(id, ownerUid = '') {
             if (!isAdminClient() && !isKasirClient()) return toast('Akses menghapus pengeluaran tidak diizinkan.');
-            const e = db.expenses.find(x => String(x.id) === String(id) && (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid)));
-            if (!e) return toast('Data pengeluaran tidak ditemukan.');
-            if (!recordBelongsToCurrentUser(e, 'expense')) return toast('Anda hanya dapat menghapus pengeluaran milik akun sendiri.');
-            if (confirm(`Hapus pengeluaran ${rupiah(e.amount)} — ${e.note || e.cat}? Data ini juga akan hilang dari laporan terkait.`)) {
-                db.expenses = db.expenses.filter(x => !(String(x.id) === String(id) && String(x.createdByUid || x.cashierUid || '') === String(e.createdByUid || e.cashierUid || '')));
+            const expense = db.expenses.find(x => String(x.id) === String(id) &&
+                (!ownerUid || String(x.createdByUid || x.cashierUid || '') === String(ownerUid)));
+            if (!expense) return toast('Data pengeluaran tidak ditemukan.');
+            if (!recordBelongsToCurrentUser(expense, 'expense')) {
+                return toast('Anda hanya dapat menghapus pengeluaran milik akun sendiri.');
+            }
+            if (!navigator.onLine || !cloudDataReady || !firebaseReady ||
+                !currentUser?.uid || !fbAuth?.currentUser || fbAuth.currentUser.uid !== currentUser.uid) {
+                return toast('Penghapusan pengeluaran membutuhkan koneksi dan sesi Firebase yang aktif.');
+            }
+            if (!confirm(`Hapus pengeluaran ${rupiah(expense.amount)} — ${expense.note || expense.cat}? Data ini juga akan hilang dari laporan terkait.`)) return;
+
+            const before = cloneDb(db);
+            db.expenses = db.expenses.filter(x => !(String(x.id) === String(id) &&
+                String(x.createdByUid || x.cashierUid || '') === String(expense.createdByUid || expense.cashierUid || '')));
+            try {
                 await save();
                 renderAll();
-                toast('Pengeluaran dihapus.');
+                toast('Pengeluaran berhasil dihapus dari Firestore.');
+            } catch (error) {
+                // save() sudah melakukan rollback ke lastCommittedDb. Snapshot lokal
+                // menjadi fallback hanya bila belum ada baseline yang terbentuk.
+                if (!lastCommittedDb) db = before;
+                normalizeDb();
+                renderAll();
+                console.error('Gagal menghapus pengeluaran:', error);
             }
         }
 
