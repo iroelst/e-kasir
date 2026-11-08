@@ -3495,6 +3495,14 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                 // untuk data legacy Kasir yang belum memiliki seluruh field kepemilikan.
                 if (prior && JSON.stringify(clean(prior)) === JSON.stringify(clean(row))) continue;
                 const payload = clean(row);
+                let existedBeforeWrite = 'tidak diketahui';
+                try {
+                    // Baca status dokumen untuk membedakan create dan update saat terjadi penolakan.
+                    const beforeWrite = await ref.doc(id).get();
+                    existedBeforeWrite = beforeWrite.exists ? 'ya (UPDATE)' : 'tidak (CREATE)';
+                } catch (readError) {
+                    existedBeforeWrite = 'tidak dapat diperiksa: ' + (readError?.code || readError?.message || 'read gagal');
+                }
                 try {
                     await ref.doc(id).set(payload, { merge: true });
                 } catch (error) {
@@ -3503,6 +3511,8 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                         .map(field => field + '=' + String(payload[field])).join(', ') || '(tidak ada field pemilik)';
                     const detail = new Error(
                         'Firestore menolak SET koleksi "' + name + '" pada dokumen "' + id + '". ' +
+                        'Jenis dokumen: ' + existedBeforeWrite + '. Path toko: toko/' + SHOP_ID + '/' + name + '/' + id + '. ' +
+                        'Role aplikasi: ' + String(currentRole || '-') + '. ' +
                         'Kode: ' + (error?.code || 'tidak diketahui') + '. ' +
                         'UID login: ' + String(currentUser?.uid || '-') + '. ' +
                         'Field pemilik: ' + ownerFields + '. ' +
