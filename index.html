@@ -2731,7 +2731,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                 <div class="card no-print" id="cashEntryCard" style="margin-top:18px">
                     <div class="section-title"><div><h2 id="cashEntryTitle">Tambah Modal / Setor Kas</h2><small id="cashEntryHelp" style="color:var(--muted)">Catat modal baru atau uang yang disetor keluar dari laci kasir.</small></div></div>
                     <div class="form-grid">
-                        <div class="field"><label>JENIS TRANSAKSI</label><select id="cashEntryType"><option value="modal">Tambah Modal (uang baru dari pemilik)</option><option value="setor">Setor Kas (keluar dari laci)</option><option value="transfer">Transfer Kas Admin ke Kasir</option></select></div>
+                        <div class="field"><label>JENIS TRANSAKSI</label><select id="cashEntryType"><option value="modal">Tambah Modal (uang baru dari pemilik)</option><option value="income">Pendapatan Lainnya</option><option value="setor">Setor Kas (keluar dari laci)</option><option value="transfer">Transfer Kas Admin ke Kasir</option></select></div>
                         <div class="field"><label>TANGGAL</label><input id="cashEntryDate" type="date"></div>
                         <div class="field"><label>NOMINAL (RP)</label><input id="cashEntryAmount" type="number" min="1" step="1" placeholder="Masukkan nominal"></div>
                         <div class="field"><label>KETERANGAN</label><input id="cashEntryNote" placeholder="Contoh: modal tambahan / setor ke brankas"></div><div class="field admin-transfer-field"><label>KASIR PENERIMA TRANSFER</label><select id="cashTransferUid"><option value="">Pilih kasir tujuan...</option></select><small style="color:var(--muted)">Hanya akun Kasir aktif di warung ini yang ditampilkan.</small></div>
@@ -3215,7 +3215,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
             if (openingTitle) openingTitle.textContent = kasir ? 'Saldo Awal Kas Saya' : 'Pengaturan Saldo Awal';
             if (openingHelp) openingHelp.textContent = kasir ? 'Masukkan saldo tunai awal untuk laci akun kasir yang sedang login.' : 'Masukkan saldo tunai awal kas usaha.';
             if (entryTitle) entryTitle.textContent = kasir ? 'Setoran Modal Kasir' : 'Tambah Modal / Setor Kas';
-            if (entryHelp) entryHelp.textContent = kasir ? 'Catat modal tambahan untuk laci kasir atau setoran uang keluar dari laci Anda.' : 'Catat modal baru dari pemilik atau uang yang disetor keluar dari laci.';
+            if (entryHelp) entryHelp.textContent = kasir ? 'Catat modal tambahan, pendapatan lainnya, atau setoran uang keluar dari laci Anda.' : 'Catat modal, pendapatan lainnya, atau setoran kas.';
             const entryType = document.getElementById('cashEntryType');
             if (entryType) entryType.options[0].textContent = kasir ? 'Tambah Modal untuk Kasir' : 'Tambah Modal (uang baru dari pemilik)';
             document.body.classList.toggle('role-kasir', kasir);
@@ -6577,7 +6577,7 @@ let pendingPurchaseBahanId = null;
             let balance = openingAmount;
             ledger.forEach(x => {
                 if (x.type === 'opening' && same(x)) return;
-                if (x.type === 'modal' && same(x)) balance += Number(x.amount) || 0;
+                if ((x.type === 'modal' || x.type === 'income') && same(x)) balance += Number(x.amount) || 0;
                 if (x.type === 'setor' && same(x)) balance -= Number(x.amount) || 0;
                 if (x.type === 'transfer' && x.fromAccountType === type && String(x.fromAccountUid) === String(uid)) balance -= Number(x.amount) || 0;
                 if (x.type === 'transfer' && x.toAccountType === type && (String(x.toAccountUid) === String(uid) || (type === 'admin' && String(x.toAccountUid) === 'admin'))) balance += Number(x.amount) || 0;
@@ -6643,6 +6643,7 @@ let pendingPurchaseBahanId = null;
                 let masuk=0, keluar=0, label=x.type;
                 if (x.type==='opening') { masuk=Number(x.amount)||0; label='Saldo awal'; }
                 if (x.type==='modal') { masuk=Number(x.amount)||0; label='Tambah modal'; }
+                if (x.type==='income') { masuk=Number(x.amount)||0; label='Pendapatan lainnya'; }
                 if (x.type==='setor') { keluar=Number(x.amount)||0; label='Setor kas'; }
                 if (x.type==='transfer') {
                     const isFrom = x.fromAccountType === account.type && String(x.fromAccountUid) === String(account.type==='admin' ? adminUid : account.uid);
