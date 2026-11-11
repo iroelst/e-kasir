@@ -2734,7 +2734,7 @@ body.role-kasir #laporan .cards > .card.metric:not(:first-child) { display: none
                         <div class="field"><label>JENIS TRANSAKSI</label><select id="cashEntryType"><option value="modal">Tambah Modal (uang baru dari pemilik)</option><option value="setor">Setor Kas (keluar dari laci)</option><option value="transfer">Transfer Kas Admin ke Kasir</option></select></div>
                         <div class="field"><label>TANGGAL</label><input id="cashEntryDate" type="date"></div>
                         <div class="field"><label>NOMINAL (RP)</label><input id="cashEntryAmount" type="number" min="1" step="1" placeholder="Masukkan nominal"></div>
-                        <div class="field"><label>KETERANGAN</label><input id="cashEntryNote" placeholder="Contoh: modal tambahan / setor ke brankas"></div><div class="field admin-transfer-field"><label>UID KASIR TUJUAN (KHUSUS TRANSFER ADMIN)</label><input id="cashTransferUid" placeholder="Isi UID akun kasir tujuan"></div>
+                        <div class="field"><label>KETERANGAN</label><input id="cashEntryNote" placeholder="Contoh: modal tambahan / setor ke brankas"></div><div class="field admin-transfer-field"><label>KASIR PENERIMA TRANSFER</label><select id="cashTransferUid"><option value="">Pilih kasir tujuan...</option></select><small style="color:var(--muted)">Hanya akun Kasir aktif di warung ini yang ditampilkan.</small></div>
                     </div>
                     <button class="btn primary" style="margin-top:12px" onclick="saveCashEntry()">Simpan Transaksi Kas</button>
                 </div>
@@ -6487,9 +6487,18 @@ let pendingPurchaseBahanId = null;
             if (type === 'transfer' && !isAdminClient()) return toast('Hanya Admin yang dapat mentransfer kas ke akun Kasir.');
             if (type === 'transfer' && isAdminClient()) {
                 const targetUid = String(document.getElementById('cashTransferUid')?.value || '').trim();
-                if (!targetUid) return toast('UID kasir tujuan wajib diisi untuk transfer.');
+                if (!targetUid) return toast('Pilih kasir tujuan transfer terlebih dahulu.');
+                let targetKasir;
+                try {
+                    targetKasir = (await getKasirUsers()).find(u => u.id === targetUid && u.disabled !== true);
+                } catch (e) {
+                    console.error('Validasi kasir tujuan gagal:', e);
+                    return toast('Daftar kasir tidak dapat diverifikasi. Periksa koneksi dan Firestore Rules.');
+                }
+                if (!targetKasir) return toast('Kasir tujuan tidak ditemukan atau sudah dinonaktifkan. Muat ulang daftar kasir.');
+                const targetName = String(targetKasir.name || targetKasir.nama || targetKasir.email || 'Kasir');
                 // Satu transaksi transfer mengubah dua saldo, tetapi tidak dihitung sebagai omzet/biaya.
-                db.cashLedger.push({ id, type: 'transfer', date, amount, note: note || 'Transfer kas admin ke kasir', fromAccountType: 'admin', fromAccountUid: currentUser?.uid || 'admin', toAccountType: 'kasir', toAccountUid: targetUid, cashAccountType: 'admin', cashAccountUid: currentUser?.uid || 'admin', ownerUid: targetUid, ownerName: a.name, createdByUid: currentUser?.uid || '', createdByName: a.name });
+                db.cashLedger.push({ id, type: 'transfer', date, amount, note: note || 'Transfer kas admin ke kasir', fromAccountType: 'admin', fromAccountUid: currentUser?.uid || 'admin', fromAccountName: a.name, toAccountType: 'kasir', toAccountUid: targetUid, toAccountName: targetName, cashAccountType: 'admin', cashAccountUid: currentUser?.uid || 'admin', ownerUid: targetUid, ownerName: targetName, createdByUid: currentUser?.uid || '', createdByName: a.name });
             } else if (type === 'setor' && isKasirClient()) {
                 // Setoran kasir masuk ke kas admin dan bukan biaya usaha.
                 db.cashLedger.push({ id, type: 'transfer', date, amount, note: note || 'Setoran kasir ke admin', fromAccountType: 'kasir', fromAccountUid: a.uid, toAccountType: 'admin', toAccountUid: 'admin', cashAccountType: 'kasir', cashAccountUid: a.uid, ownerUid: a.uid, ownerName: a.name, createdByUid: a.uid, createdByName: a.name });
@@ -6592,6 +6601,7 @@ let pendingPurchaseBahanId = null;
 
         function renderCashFinance() {
             if (!document.getElementById('cashFlowTable')) return;
+            if (isAdminClient()) loadCashTransferKasirOptions();
             ensureCashFinanceData();
             const account = currentCashAccount();
             const opening = getCurrentCashOpening();
@@ -6753,12 +6763,42 @@ let pendingPurchaseBahanId = null;
             return snap.docs.map(d => ({ id: d.id, ...d.data() }));
         }
 
+        async function loadCashTransferKasirOptions(forceReload = false) {
+            const select = document.getElementById('cashTransferUid');
+            if (!select || !isAdminClient()) return;
+            if (!forceReload && select.dataset.loadedShopId === SHOP_ID) return;
+            const previousValue = select.value;
+            select.innerHTML = '<option value="">Memuat daftar kasir...</option>';
+            try {
+                const users = (await getKasirUsers())
+                    .filter(u => u.disabled !== true)
+                    .sort((a, b) => String(a.name || a.nama || a.email || '').localeCompare(String(b.name || b.nama || b.email || ''), 'id'));
+                if (!users.length) {
+                    select.innerHTML = '<option value="">Belum ada kasir aktif</option>';
+                } else {
+                    select.innerHTML = '<option value="">Pilih kasir tujuan...</option>' + users.map(u => {
+                        const name = String(u.name || u.nama || u.email || 'Kasir');
+                        const email = String(u.email || '');
+                        const label = email && email !== name ? `${name} · ${email}` : name;
+                        return `<option value="${escapeHtml(u.id)}">${escapeHtml(label)}</option>`;
+                    }).join('');
+                    if (users.some(u => u.id === previousValue)) select.value = previousValue;
+                }
+                select.dataset.loadedShopId = SHOP_ID;
+            } catch (e) {
+                console.error('loadCashTransferKasirOptions:', e);
+                select.innerHTML = '<option value="">Gagal memuat kasir — coba lagi</option>';
+                select.dataset.loadedShopId = '';
+            }
+        }
+
         async function renderKasirUsers() {
             const box = document.getElementById('kasirUserList');
             if (!box || !isAdminClient()) return;
             box.innerHTML = '<div class="empty" style="padding:16px 5px">Memuat daftar Kasir...</div>';
             try {
                 const users = await getKasirUsers();
+                await loadCashTransferKasirOptions(true);
                 if (!users.length) {
                     box.innerHTML = '<div class="empty" style="padding:16px 5px">Belum ada akun Kasir.</div>';
                     return;
